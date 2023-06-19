@@ -52,11 +52,7 @@ GAMMA_LAMBDA = GAMMA * 0.95
 TRAINING_PARAMS = dict(
     max_epochs = 10000,
     save_interval = None,
-    terminate_reward = -1,
-
-    # params that I added
-    threshold = None,
-    threshold_conditioned = False
+    terminate_reward = -1
 
 )
 def logger(obs, rews, info):
@@ -109,19 +105,6 @@ def logger(obs, rews, info):
         
         else:
             rewards_task = None
-        
-        # conditional task rewards (use threshold for discriminator to be trained first)
-        if has_goal_reward and TRAINING_PARAMS['threshold_conditioned']:
-            # disc rewards만 떼어오기
-            disc_rewards = rewards[:, range(len(disc_data_raw))]                # [horizon X num_envs, len(disc_data_raw)]
-            # disc rewards 모두 threshold를 넘는값만 clamp하기
-            clamped_rewards = torch.where(disc_rewards > TRAINING_PARAMS.threshold, disc_rewards, 0)
-            # logical_and을 사용하여 threshold 이상 (즉 0 이상)인 index만 true값으로 반영
-            thres_idx = torch.logical_and(clamped_rewards[:, 0], clamped_rewards[:, 1]).unsqueeze_(-1)
-            
-            # conditional task rewards를 thres_idx == True인 원소들에만 주기
-            conditioned_task_rewards = torch.where(thres_idx == True, rewards_task, 0)
-            rewards[:, -rewards_task.size(-1):] = conditioned_task_rewards
             
         rewards = rewards.mean(0).cpu().tolist()                                        # [num_reward]
         print("Reward: {}".format("/".join(list(map("{:.4f}".format, rewards)))))
