@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import random
 from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -24,6 +25,8 @@ parser.add_argument("--device", type=int, default=0,
     help="ID of the target GPU device for model running.")
 parser.add_argument('--headless', action='store_true',
     help='Run headless without creating a viewer window')
+parser.add_argument("--server", type=str, default=None,
+    help="server docker name")
     
 settings = parser.parse_args()
 
@@ -418,8 +421,12 @@ if __name__ == "__main__":
             import shutil, sys
             os.makedirs(settings.ckpt, exist_ok=True)
             shutil.copy(settings.config, settings.ckpt)
-            with open(os.path.join(settings.ckpt, "command_{}.txt".format(time.time())), "w") as f:
-                f.write(" ".join(sys.argv))
+            command_name = time.time() if settings.server == None else settings.server
+            with open(os.path.join(settings.ckpt, "command_{}.txt".format(command_name)), "w") as f:
+                f.write("python " + " ".join(sys.argv))
+                now = datetime.now()
+                f.write("\n\n시작 날짜: {}".format(now.date()))
+                f.write("\n시작 시각: {}:{}:{}".format(now.hour, now.minute, now.second))
 
     if os.path.splitext(settings.config)[-1] in [".npy", ".json", ".yaml"]:
         config = object()
