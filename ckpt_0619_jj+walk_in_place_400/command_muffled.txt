@@ -1,0 +1,3 @@
+python main.py config/front_jumping_jack+walk_in_place.py --ckpt ckpt_0619_jj+walk_in_place --headless --server muffled
+
+0619_13:27PM
