@@ -22,6 +22,9 @@ parser.add_argument("--seed", type=int, default=42,
     help="Random seed.")
 parser.add_argument("--device", type=int, default=0,
     help="ID of the target GPU device for model running.")
+parser.add_argument('--headless', action='store_true',
+    help='Run headless without creating a viewer window')
+    
 settings = parser.parse_args()
 
     
@@ -427,6 +430,11 @@ if __name__ == "__main__":
         spec = importlib.util.spec_from_file_location("config", settings.config)
         config = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(config)
+
+    # if headless
+    if settings.headless:
+        config.env_params['graphics_device'] = -1
+
 
     if hasattr(config, "training_params"):
         TRAINING_PARAMS.update(config.training_params)
