@@ -404,6 +404,11 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
                 if rewards_task is not None: 
                     for i in range(len(rewards_task)):
                         logger.add_scalar("train/task_reward_{}".format(i), rewards_task[i], epoch)
+                # discriminator loss
+                len_reward_task = len(rewards_task) if rewards_task is not None else 0
+                for i in range(len(rewards)-len_reward_task):
+                    logger.add_scalar("train/reward_disc_{}".format(i), rewards[i], epoch)
+
             for v in real_losses.values(): v.clear()
             for v in fake_losses.values(): v.clear()
             
