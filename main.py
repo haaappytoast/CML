@@ -537,10 +537,9 @@ if __name__ == "__main__":
 
                 # optim reload
                 optim_ckpt = settings.resume + "_optims"
-                resumed_optimizer = torch.load(optim_ckpt, map_location=torch.device(settings.device))      # loaded model
-
-                train(env, model, settings.ckpt, training_params, resumed_optimizer)
-
+                if os.path.exists(optim_ckpt):
+                    resumed_optimizer = torch.load(optim_ckpt, map_location=torch.device(settings.device))      # loaded model
+                    train(env, model, settings.ckpt, training_params, resumed_optimizer)
             else:
                 raise ValueError("Please correctly type checkpoint path to resume training")
 
