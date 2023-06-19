@@ -141,7 +141,7 @@ def test(env, model):
             rewards_tot = 0
             count = 0
 
-def train(env, model, ckpt_dir, training_params):
+def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
     if ckpt_dir is not None:
         logger = SummaryWriter(ckpt_dir)
     else:
@@ -153,6 +153,15 @@ def train(env, model, ckpt_dir, training_params):
     ])
     ac_parameters = list(model.actor.parameters()) + list(model.critic.parameters())
     disc_optimizer = {name: torch.optim.Adam(disc.parameters(), 1e-5) for name, disc in model.discriminators.items()}
+
+    # load_state_dict of optimizers
+    if resumed_optimizer is not None:
+        # optimize model optim
+        optimizer.load_state_dict(resumed_optimizer['model_optim'])
+
+        for name, _ in model.discriminators.items():
+            assert(name in resumed_optimizer.keys()), "Optimizer keys should be matched"
+            disc_optimizer[name].load_state_dict(resumed_optimizer[name])
 
     buffer = dict(
         s=[], a=[], v=[], lp=[], v_=[], not_done=[], terminate=[],
@@ -404,11 +413,24 @@ def train(env, model, ckpt_dir, training_params):
                     state = dict(
                         model=model.state_dict()
                     )
+                    optims= {
+                        disc_name : disc_optimizer[disc_name].state_dict() for disc_name in disc_optimizer.keys()
+                        } 
+                    optims['model_optim'] = optimizer.state_dict()
                     torch.save(state, os.path.join(ckpt_dir, "ckpt"))
+                    torch.save(optims, os.path.join(ckpt_dir, "ckpt_optims"))
+
                 if epoch % training_params.save_interval == 0:
                     if state is None:
                         state = dict(model=model.state_dict())
+                        optims= {
+                        disc_name : disc_optimizer[disc_name].state_dict() for disc_name in disc_optimizer.keys()
+                        } 
+                        optims['model_optim'] = optimizer.state_dict()
+
                     torch.save(state, os.path.join(ckpt_dir, "ckpt-{}".format(epoch)))
+                    torch.save(optims, os.path.join(ckpt_dir, "ckpt-{}_optims".format(epoch)))
+
                 if epoch >= training_params.max_epochs: exit()
             tic = time.time()
 
@@ -508,12 +530,19 @@ if __name__ == "__main__":
 
             if os.path.isfile(settings.resume) and os.path.exists(settings.resume):
                 resume_ckpt = settings.resume
-                print(resume_ckpt)
                 state_dict = torch.load(resume_ckpt, map_location=torch.device(settings.device))      # loaded model
                 model_dict = model.state_dict()                                                        # current model
                 model.load_state_dict(state_dict['model'])
                 print("\n-----------\nResuming training with checkpoint: {}\n-----------\n".format(resume_ckpt))
+
+                # optim reload
+                optim_ckpt = settings.resume + "_optims"
+                resumed_optimizer = torch.load(optim_ckpt, map_location=torch.device(settings.device))      # loaded model
+
+                train(env, model, settings.ckpt, training_params, resumed_optimizer)
+
             else:
                 raise ValueError("Please correctly type checkpoint path to resume training")
-            
-        train(env, model, settings.ckpt, training_params)
+
+        else:
+            train(env, model, settings.ckpt, training_params)
