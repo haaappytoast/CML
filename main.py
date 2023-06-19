@@ -27,7 +27,9 @@ parser.add_argument('--headless', action='store_true',
     help='Run headless without creating a viewer window')
 parser.add_argument("--server", type=str, default=None,
     help="server docker name")
-    
+parser.add_argument("--resume", type=str, default=None,
+    help="resume with existing checkpoint")
+
 settings = parser.parse_args()
 
     
@@ -482,6 +484,9 @@ if __name__ == "__main__":
     model.discriminators = discriminators
 
     if settings.test:
+        if settings.resume is not None:
+            raise ValueError("This is test time. You can't use arguments of resume")
+
         if settings.ckpt is not None and os.path.exists(settings.ckpt):
             if os.path.isdir(settings.ckpt):
                 ckpt = os.path.join(settings.ckpt, "ckpt")
@@ -494,5 +499,21 @@ if __name__ == "__main__":
                 model.load_state_dict(state_dict["model"])
         env.render()
         test(env, model)
+    # train 일 때
     else:
+        # resume 시키려면 
+        if settings.resume:
+            if (os.path.isfile(settings.ckpt)):
+                raise ValueError("It should be folder name not checkpoint name!")
+
+            if os.path.isfile(settings.resume) and os.path.exists(settings.resume):
+                resume_ckpt = settings.resume
+                print(resume_ckpt)
+                state_dict = torch.load(resume_ckpt, map_location=torch.device(settings.device))      # loaded model
+                model_dict = model.state_dict()                                                        # current model
+                model.load_state_dict(state_dict['model'])
+                print("\n-----------\nResuming training with checkpoint: {}\n-----------\n".format(resume_ckpt))
+            else:
+                raise ValueError("Please correctly type checkpoint path to resume training")
+            
         train(env, model, settings.ckpt, training_params)
