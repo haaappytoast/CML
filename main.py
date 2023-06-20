@@ -451,7 +451,7 @@ if __name__ == "__main__":
             os.makedirs(settings.ckpt, exist_ok=True)
             shutil.copy(settings.config, settings.ckpt)
             command_name = time.time() if settings.server == None else settings.server
-            with open(os.path.join(settings.ckpt, "command_{}.txt".format(command_name)), "w") as f:
+            with open(os.path.join(settings.ckpt, "_command_{}.txt".format(command_name)), "w") as f:
                 f.write("python " + " ".join(sys.argv))
                 now = datetime.now()
                 f.write("\n\n시작 날짜: {}".format(now.date()))
