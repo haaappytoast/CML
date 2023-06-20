@@ -1597,8 +1597,8 @@ def observe_iccgan_juggling_target(state_hist: torch.Tensor, seq_len: torch.Tens
 class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
     
     GOAL_REWARD_WEIGHT = 0.25, 0.25
-    GOAL_DIM = 4+3
-    GOAL_TENSOR_DIM = 3+4
+    GOAL_DIM = 4+3+3
+    GOAL_TENSOR_DIM = 3+4+4
 
     def create_tensors(self):
         super().create_tensors()
@@ -1612,12 +1612,14 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
         self.x_dir[..., 0] = 1
         self.reverse_rotation = torch.zeros_like(self.root_orient)
         self.reverse_rotation[..., self.UP_AXIS] = 1
-        # I added left hand
+
+        #! I added left hand
         self.l_hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "left_hand")
         self.l_lower_arm_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "left_lower_arm")
 
         self.l_aiming_start_link = self.l_lower_arm_link
         self.l_aiming_end_link = self.l_hand_link
+        #!
 
     def _observe(self, env_ids):
         if env_ids is None:
@@ -1637,7 +1639,7 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
         super().update_viewer()
 
         target_tensor = self.goal_tensor[:, :3]
-        aiming_tensor = self.goal_tensor[:, 3:]                           # aiming orientation RELATIVE to q
+        aiming_tensor = self.goal_tensor[:, 3:7]                           # aiming orientation RELATIVE to q
 
         root_orient = self.root_orient
         root_gheading_dir = torch.zeros_like(root_orient[...,:3])
@@ -1679,20 +1681,22 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
             e = self.envs[i]
             self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
 
-        # #! I added left hand
+
+        #! I added left hand
+        l_aiming_tensor = self.goal_tensor[:, 7:]                          # l_aiming orientation RELATIVE to q
         # l_aiming_tensor = self.temp
-        # l_aiming_dir = rotatepoint(quatmultiply(q, l_aiming_tensor), x_dir)
-        # l_start = link_pos[:, self.l_aiming_start_link]   # lower arm link
-        # l_end = l_start + l_aiming_dir
-        # l_start = l_start.cpu().numpy()
-        # l_end = l_end.cpu().numpy()
-        # l_lines = np.stack([
-        #     np.stack((l_start[:,0], l_start[:,1], l_start[:,2]+0.005*i, l_end[:, 0], l_end[:, 1], l_end[:,2]+0.005*i), -1)
-        # for i in range(-n_lines//2, n_lines//2)], -2)
-        # for i, l in zip(not_near, l_lines):
-        #     e = self.envs[i]
-        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 1.] for _ in range(n_lines)])
-        
+        l_aiming_dir = rotatepoint(quatmultiply(q, l_aiming_tensor), x_dir)
+        l_start = link_pos[:, self.l_aiming_start_link]   # lower arm link
+        l_end = l_start + l_aiming_dir
+        l_start = l_start.cpu().numpy()
+        l_end = l_end.cpu().numpy()
+        l_lines = np.stack([
+            np.stack((l_start[:,0], l_start[:,1], l_start[:,2]+0.005*i, l_end[:, 0], l_end[:, 1], l_end[:,2]+0.005*i), -1)
+        for i in range(-n_lines//2, n_lines//2)], -2)
+        for i, l in zip(not_near, l_lines):
+            e = self.envs[i]
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 1.] for _ in range(n_lines)])        
+        #!
         self.visualize_axis(self.link_pos[:, [0], :], self.link_orient[:, [0], :])
 
 
@@ -1730,10 +1734,11 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
             self.goal_tensor[env_ids, 5] = z
             self.goal_tensor[env_ids, 6] = w
         
+        #! Added for left hand
         # left hand
-        l_elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/6)
-        l_azim = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/4)
-        if self.viewer is not None: l_azim.add_(0.3)
+        l_elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        l_azim = torch.ones(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/2)
+        # if self.viewer is not None: l_azim.add_(0.3)
 
         l_elev /= 2
         l_azim /= 2
@@ -1748,19 +1753,20 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
         l_z = l_cp*l_sy  # cr*l_cp*l_sy - sr*l_sp*l_cy
         
         if n_envs == len(self.envs):
-            self.temp[:, 3-3] = l_x
-            self.temp[:, 4-3] = l_y
-            self.temp[:, 5-3] = l_z 
-            self.temp[:, 6-3] = l_w
+            self.goal_tensor[:, 3+4] = l_x
+            self.goal_tensor[:, 4+4] = l_y
+            self.goal_tensor[:, 5+4] = l_z 
+            self.goal_tensor[:, 6+4] = l_w
         else:
-            self.temp[env_ids, 3-3] = l_x
-            self.temp[env_ids, 4-3] = l_y
-            self.temp[env_ids, 5-3] = l_z
-            self.temp[env_ids, 6-3] = l_w
+            self.goal_tensor[env_ids, 3+4] = l_x
+            self.goal_tensor[env_ids, 4+4] = l_y
+            self.goal_tensor[env_ids, 5+4] = l_z
+            self.goal_tensor[env_ids, 6+4] = l_w
+        #!
 
     def reward(self):
         target_tensor = self.goal_tensor[:, :3]
-        aiming_tensor = self.goal_tensor[:, 3:]
+        aiming_tensor = self.goal_tensor[:, 3:7]
         
         target_rew = super().reward(target_tensor)
 
@@ -1801,6 +1807,29 @@ class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
         
         aiming_rew = torch.where(self.near, rest_rew, aiming_rew).unsqueeze_(-1)
 
+        #! added for left hand
+        l_aiming_tensor = self.goal_tensor[:, 7:]
+
+        l_aiming_dir = rotatepoint(quatmultiply(q, l_aiming_tensor), self.x_dir)
+
+        l_hand_pos = self.link_pos[:, self.l_aiming_end_link]
+        l_fore_arm_pos = self.link_pos[:, self.l_aiming_start_link]
+
+        l_fore_arm_dir = l_hand_pos - l_fore_arm_pos
+        l_arm_len = torch.linalg.norm(l_fore_arm_dir, ord=2, dim=-1, keepdim=True)
+        l_fore_arm_dir.div_(l_arm_len)
+
+        l_target_hand_pos = l_fore_arm_pos + l_arm_len * l_aiming_dir
+        l_e = torch.linalg.norm(l_target_hand_pos.sub_(l_hand_pos), ord=2, dim=-1).div_(l_arm_len.squeeze_(-1))
+        l_aiming_rew = l_e.mul_(-2).exp_()
+
+        l_rest_rew = l_fore_arm_dir[..., self.UP_AXIS].div(0.8).clip_(min=0, max=1) # 2nd reward to encourage character to lift its arm when aiming action is not activated
+        
+        l_aiming_rew = torch.where(self.near, l_rest_rew, l_aiming_rew).unsqueeze_(-1)
+
+        aiming_rew = 0.5 * aiming_rew + 0.5 * l_aiming_rew
+        #!
+
         r = torch.cat((target_rew, aiming_rew), -1)
         return r
 
@@ -1814,7 +1843,7 @@ def observe_iccgan_target_twohands(state_hist: torch.Tensor, seq_len: torch.Tens
     UP_AXIS = 2
 
     target_tensor = goal_tensor[..., :3]
-    aiming_tensor = goal_tensor[..., 3:]
+    aiming_tensor = goal_tensor[..., 3:7]
 
     target_ob = observe_iccgan_target(state_hist, seq_len, target_tensor, timer, sp_upper_bound=sp_upper_bound, fps=fps)
     
@@ -1863,4 +1892,19 @@ def observe_iccgan_target_twohands(state_hist: torch.Tensor, seq_len: torch.Tens
     aiming_dir[near, 1] = 0
     aiming_dir[near, 2] = 0
     
-    return torch.cat((target_ob, aiming_dir), -1)
+    #! added for left hand
+    l_aiming_tensor = goal_tensor[..., 7:]
+
+    # 1. get root_gheading_dir as target_dir
+    # 2. erase z-component of root_gheading_dir
+    # ensure 180 degree rotation is around the up axis
+    
+    l_aiming_dir = quatmultiply(q, l_aiming_tensor)
+    l_aiming_dir = quatmultiply(orient_inv, l_aiming_dir)
+    l_aiming_dir = rotatepoint(l_aiming_dir, x_dir)
+
+    l_aiming_dir[near, 0] = 0
+    l_aiming_dir[near, 1] = 0
+    l_aiming_dir[near, 2] = 0
+
+    return torch.cat((target_ob, aiming_dir, l_aiming_dir), -1)
