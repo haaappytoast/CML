@@ -1,6 +1,6 @@
 import numpy as np
 
-env_cls = "ICCGANHumanoidTEMP"
+env_cls = "ICCGANHumanoidTwohands"
 env_params = dict(
     episode_length = 500,
     motion_file = "assets/motions/clips_walk.yaml",
