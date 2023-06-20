@@ -280,9 +280,9 @@ class Env(object):
         if not self.viewer_pause:
             env_ids = torch.nonzero(self.done).view(-1)
             if len(env_ids):
-                self.reset_envs(env_ids)
+                self.reset_envs(env_ids)                                # 1. reset_envs를 통해 goal도 reset한다!
                 if len(env_ids) == len(self.envs) or self.obs is None:
-                    self.obs = self.observe()
+                    self.obs = self.observe()                           # 2. 이후 새로운 goal과 state를 가지고 다음 obs observe!
                 else:
                     self.obs[env_ids] = self.observe(env_ids)
         return self.obs, self.info
@@ -791,8 +791,8 @@ def observe_disc(state_hist: torch.Tensor, seq_len: torch.Tensor, key_links: Opt
 class ICCGANHumanoidTarget(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
-    GOAL_DIM = 4
-    GOAL_TENSOR_DIM = 3
+    GOAL_DIM = 4                    # (x, y, sp, dist)
+    GOAL_TENSOR_DIM = 3             # global position of root target (X, Y, Z) - where root should reach
     ENABLE_GOAL_TIMER = True
 
     GOAL_RADIUS = 0.5
@@ -831,7 +831,7 @@ class ICCGANHumanoidTarget(ICCGANHumanoid):
             np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
         for i in range(n_lines)], -2)
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
         n_lines = 10
         target_pos = self.goal_tensor.cpu().numpy()
         lines = np.stack([
@@ -843,7 +843,7 @@ class ICCGANHumanoidTarget(ICCGANHumanoid):
             ), -1)
         for i in range(n_lines)], -2)
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
     
     def _observe(self, env_ids):
         if env_ids is None:
@@ -858,6 +858,7 @@ class ICCGANHumanoidTarget(ICCGANHumanoid):
             )
 
     def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
+        #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
         
@@ -874,14 +875,14 @@ class ICCGANHumanoidTarget(ICCGANHumanoid):
         theta = torch.where(small_turn, small_angle, large_angle)
 
         timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-        if self.goal_sp_min == self.goal_sp_max:
+        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
             vel = self.goal_sp_min
-        elif self.goal_sp_std == 0:
+        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
             vel = self.goal_sp_mean
         else:
             vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
         
-        dist = vel*timer*self.step_time
+        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
         dx = dist*torch.cos(theta)
         dy = dist*torch.sin(theta)
 
@@ -895,26 +896,26 @@ class ICCGANHumanoidTarget(ICCGANHumanoid):
             goal_timer[env_ids] = timer
             goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
             goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
-
+        
     def reward(self, goal_tensor=None, goal_timer=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
 
-        p = self.root_pos
-        p_ = self.state_hist[-1][:, :3]
+        p = self.root_pos                                       # 현재 root_pos
+        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
 
-        dp_ = goal_tensor - p_
+        dp_ = goal_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
         dp_[:, self.UP_AXIS] = 0
         dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
-        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)
+        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
 
         v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
         sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
-        v_ *= (sp_/v_mag).unsqueeze_(-1)
+        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
 
-        dp = p - p_
+        dp = p - p_                                            # (현재 root - 이전 root)
         dp[:, self.UP_AXIS] = 0
-        v = dp / self.step_time
+        v = dp / self.step_time                                # current velocity: dp / duration 
         r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
 
         dp = goal_tensor - p
@@ -953,15 +954,15 @@ def observe_iccgan_target(state_hist: torch.Tensor, seq_len: torch.Tensor,
     x = dp[:, 0]
     y = dp[:, 1]
     heading_inv = -heading_zup(root_orient)
-    c = torch.cos(heading_inv)
+    c = torch.cos(heading_inv)      # root_orientation의 x-dir의 각도 (inverse) 
     s = torch.sin(heading_inv)
-    x, y = c*x-s*y, s*x+c*y
+    x, y = c*x-s*y, s*x+c*y         # [[c -s], [s c]] * [x y]^T (local_dp -> root_orient에서 바라본 dp)
 
     dist = (x*x + y*y).sqrt_()
-    sp = dist.mul(fps/timer)
+    sp = dist.mul(fps/timer)        # speed! ... dist/timer->how many dist we should go per step ... dist*fps/timer -> how much distance we should go in 1 sec
 
     too_close = dist < 1e-5
-    x = torch.where(too_close, x, x/dist)
+    x = torch.where(too_close, x, x/dist)   # x/dist: normalized x
     y = torch.where(too_close, y, y/dist)
     sp.clip_(max=sp_upper_bound)
     dist.div_(3).clip_(max=1.5)

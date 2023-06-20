@@ -185,7 +185,7 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
     tic = time.time()
     while not env.request_quit:
         with torch.no_grad():
-            obs, info = env.reset_done()
+            obs, info = env.reset_done()    # reset_envs -> reset_goals -> 다음 obs observe
             seq_len = info["ob_seq_lens"]
             reward_weights = info["reward_weights"]
             actions, values, log_probs = model.act(obs, seq_len-1, stochastic=True)
