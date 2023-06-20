@@ -1593,3 +1593,257 @@ def observe_iccgan_juggling_target(state_hist: torch.Tensor, seq_len: torch.Tens
     ball_state_n = torch.cat((ball_pos, ball_lin_vel), -1)
 
     return torch.cat((ob, ball_state_l, ball_state_r, ball_state_n, timer.unsqueeze_(-1)), -1)
+
+class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
+    
+    GOAL_REWARD_WEIGHT = 0.25, 0.25
+    GOAL_DIM = 4+3
+    GOAL_TENSOR_DIM = 3+4
+
+    def create_tensors(self):
+        super().create_tensors()
+        self.hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_hand")
+        self.lower_arm_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_lower_arm")
+
+        self.aiming_start_link = self.lower_arm_link
+        self.aiming_end_link = self.hand_link
+
+        self.x_dir = torch.zeros_like(self.root_pos)
+        self.x_dir[..., 0] = 1
+        self.reverse_rotation = torch.zeros_like(self.root_orient)
+        self.reverse_rotation[..., self.UP_AXIS] = 1
+        # I added left hand
+        self.l_hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "left_hand")
+        self.l_lower_arm_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "left_lower_arm")
+
+        self.l_aiming_start_link = self.l_lower_arm_link
+        self.l_aiming_end_link = self.l_hand_link
+
+    def _observe(self, env_ids):
+        if env_ids is None:
+            return observe_iccgan_target_temp(
+                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
+                self.goal_tensor, self.goal_timer,
+                sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
+            )
+        else:
+            return observe_iccgan_target_temp(
+                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
+                self.goal_tensor[env_ids], self.goal_timer[env_ids],
+                sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
+            )
+
+    def update_viewer(self):
+        super().update_viewer()
+
+        target_tensor = self.goal_tensor[:, :3]
+        aiming_tensor = self.goal_tensor[:, 3:]
+
+        root_orient = self.root_orient
+        target_dir = torch.zeros_like(root_orient[...,:3])
+        target_dir[..., 0] = 1
+        target_dir = rotatepoint(root_orient, target_dir)
+
+        # target_dir = target_tensor - self.root_pos
+        target_dir[..., self.UP_AXIS] = 0
+        dist = torch.linalg.norm(target_dir, ord=2, dim=-1, keepdim=True)
+        not_near = (dist > self.goal_radius).squeeze_(-1)
+        dist = dist[not_near]
+        if dist.nelement() < 1: return
+
+        target_dir = target_dir[not_near]
+        target_dir.div_(dist)
+        link_pos = self.link_pos[not_near]
+        x_dir = self.x_dir[:target_dir.size(0)]
+        q = quatdiff_normalized(x_dir, target_dir)
+
+        # ensure 180 degree rotation is around the up axis
+        q = torch.where(target_dir[:, :1] < -0.99999,
+            self.reverse_rotation, q)
+        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), x_dir)
+
+        start = link_pos[:, self.aiming_start_link]
+        end = start + aiming_dir
+        start = start.cpu().numpy()
+        end = end.cpu().numpy()
+        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
+        n_lines = 10
+
+        lines = np.stack([
+            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, end[:, 0], end[:, 1], end[:,2]+0.005*i), -1)
+        for i in range(-n_lines//2, n_lines//2)], -2)
+        for i, l in zip(not_near, lines):
+            e = self.envs[i]
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
+
+        # #! I added left hand
+        # l_aiming_tensor = self.temp
+        # l_aiming_dir = rotatepoint(quatmultiply(q, l_aiming_tensor), x_dir)
+        # l_start = link_pos[:, self.l_aiming_start_link]   # lower arm link
+        # l_end = l_start + l_aiming_dir
+        # l_start = l_start.cpu().numpy()
+        # l_end = l_end.cpu().numpy()
+        # l_lines = np.stack([
+        #     np.stack((l_start[:,0], l_start[:,1], l_start[:,2]+0.005*i, l_end[:, 0], l_end[:, 1], l_end[:,2]+0.005*i), -1)
+        # for i in range(-n_lines//2, n_lines//2)], -2)
+        # for i, l in zip(not_near, l_lines):
+        #     e = self.envs[i]
+        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 1.] for _ in range(n_lines)])
+        
+        self.visualize_axis(self.link_pos[:, [0], :], self.link_orient[:, [0], :])
+
+
+    def reset_goal(self, env_ids):
+        super().reset_goal(env_ids, self.goal_tensor[:, :3])
+        self.reset_aiming_goal(env_ids)
+    
+    def reset_aiming_goal(self, env_ids):
+        n_envs = len(env_ids)
+        elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        azim = torch.ones(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        # if self.viewer is not None: azim.add_(0.3)
+
+        self.temp = torch.zeros_like(self.goal_tensor[..., [0,1,2,3]])
+        elev /= 2
+        azim /= 2
+        cp = torch.cos(elev) # y
+        sp = torch.sin(elev)
+        cy = torch.cos(azim) # z
+        sy = torch.sin(azim)
+
+        w = cp*cy  # cr*cp*cy + sr*sp*sy
+        x = -sp*sy # sr*cp*cy - cr*sp*sy
+        y = sp*cy  # cr*sp*cy + sr*cp*sy
+        z = cp*sy  # cr*cp*sy - sr*sp*cy
+        
+        if n_envs == len(self.envs):
+            self.goal_tensor[:, 3] = x
+            self.goal_tensor[:, 4] = y
+            self.goal_tensor[:, 5] = z 
+            self.goal_tensor[:, 6] = w
+        else:
+            self.goal_tensor[env_ids, 3] = x
+            self.goal_tensor[env_ids, 4] = y
+            self.goal_tensor[env_ids, 5] = z
+            self.goal_tensor[env_ids, 6] = w
+        
+        # left hand
+        l_elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/6)
+        l_azim = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/4)
+        if self.viewer is not None: l_azim.add_(0.3)
+
+        l_elev /= 2
+        l_azim /= 2
+        l_cp = torch.cos(l_elev) # y
+        l_sp = torch.sin(l_elev)
+        l_cy = torch.cos(l_azim) # z
+        l_sy = torch.sin(l_azim)
+
+        l_w = l_cp*l_cy  # cr*l_cp*l_cy + sr*l_sp*l_sy
+        l_x = -l_sp*l_sy # sr*l_cp*l_cy - cr*l_sp*l_sy
+        l_y = l_sp*l_cy  # cr*l_sp*l_cy + sr*l_cp*l_sy
+        l_z = l_cp*l_sy  # cr*l_cp*l_sy - sr*l_sp*l_cy
+        
+        if n_envs == len(self.envs):
+            self.temp[:, 3-3] = l_x
+            self.temp[:, 4-3] = l_y
+            self.temp[:, 5-3] = l_z 
+            self.temp[:, 6-3] = l_w
+        else:
+            self.temp[env_ids, 3-3] = l_x
+            self.temp[env_ids, 4-3] = l_y
+            self.temp[env_ids, 5-3] = l_z
+            self.temp[env_ids, 6-3] = l_w
+
+    def reward(self):
+        target_tensor = self.goal_tensor[:, :3]
+        aiming_tensor = self.goal_tensor[:, 3:]
+        
+        target_rew = super().reward(target_tensor)
+
+        dp = target_tensor - self.root_pos
+        dp[..., self.UP_AXIS] = 0
+        dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
+        
+        # target_dir = dp / dist
+
+        #! what I added
+        root_orient = self.root_orient
+        target_dir = torch.zeros_like(root_orient[...,:3])
+        
+        q0 = quatdiff_normalized(self.x_dir, target_dir)
+        q = torch.where(target_dir[:, :1] < -0.99999,
+            self.reverse_rotation, q0)
+
+        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), self.x_dir)
+
+        hand_pos = self.link_pos[:, self.aiming_end_link]
+        fore_arm_pos = self.link_pos[:, self.aiming_start_link]
+
+        fore_arm_dir = hand_pos - fore_arm_pos
+        arm_len = torch.linalg.norm(fore_arm_dir, ord=2, dim=-1, keepdim=True)
+        fore_arm_dir.div_(arm_len)
+
+        target_hand_pos = fore_arm_pos + arm_len * aiming_dir
+        e = torch.linalg.norm(target_hand_pos.sub_(hand_pos), ord=2, dim=-1).div_(arm_len.squeeze_(-1))
+        aiming_rew = e.mul_(-2).exp_()
+
+        rest_rew = fore_arm_dir[..., self.UP_AXIS].div(0.8).clip_(min=0, max=1) # 2nd reward to encourage character to lift its arm when aiming action is not activated
+        
+        aiming_rew = torch.where(self.near, rest_rew, aiming_rew).unsqueeze_(-1)
+
+        r = torch.cat((target_rew, aiming_rew), -1)
+        return r
+
+    def termination_check(self):
+        return super().termination_check(self.goal_tensor[:, :3])
+
+def observe_iccgan_target_temp(state_hist: torch.Tensor, seq_len: torch.Tensor, 
+    goal_tensor: torch.Tensor, timer: torch.Tensor,
+    sp_upper_bound: float, goal_radius: float, fps: int
+):
+    UP_AXIS = 2
+
+    target_tensor = goal_tensor[..., :3]
+    aiming_tensor = goal_tensor[..., 3:]
+
+    target_ob = observe_iccgan_target(state_hist, seq_len, target_tensor, timer, sp_upper_bound=sp_upper_bound, fps=fps)
+    
+    root_pos = state_hist[-1, :, :3]
+    root_orient = state_hist[-1, :, 3:7]
+    heading = heading_zup(root_orient)
+    up_dir = torch.zeros_like(root_pos)
+    up_dir[..., UP_AXIS] = 1
+    orient_inv = axang2quat(up_dir, -heading)
+
+    dp = target_tensor - root_pos
+    dp[..., UP_AXIS] = 0
+    dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
+    
+    x_dir = torch.zeros_like(dp)
+    x_dir[..., 0] = 1
+
+    # target_dir = dp / dist
+
+    #! what I added
+    # root_orient = self.root_orient
+    target_dir = torch.zeros_like(root_orient[...,:3])    
+    q = quatdiff_normalized(x_dir, target_dir)
+
+    # ensure 180 degree rotation is around the up axis
+    reverse = torch.zeros_like(q)
+    reverse[..., UP_AXIS] = 1
+    q = torch.where(target_dir[:, :1] < -0.99999,
+        reverse, q)
+
+    aiming_dir = quatmultiply(q, aiming_tensor)
+    aiming_dir = quatmultiply(orient_inv, aiming_dir)
+    aiming_dir = rotatepoint(aiming_dir, x_dir)
+
+    near = dist.squeeze_(-1) < goal_radius
+    # aiming_dir[near] = 0 # not supported by script
+    aiming_dir[near, 0] = 0
+    aiming_dir[near, 1] = 0
+    aiming_dir[near, 2] = 0
+    
+    return torch.cat((target_ob, aiming_dir), -1)
