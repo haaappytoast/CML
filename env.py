@@ -1637,33 +1637,36 @@ class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
         super().update_viewer()
 
         target_tensor = self.goal_tensor[:, :3]
-        aiming_tensor = self.goal_tensor[:, 3:]
+        aiming_tensor = self.goal_tensor[:, 3:]                           # aiming orientation RELATIVE to q
 
         root_orient = self.root_orient
-        target_dir = torch.zeros_like(root_orient[...,:3])
-        target_dir[..., 0] = 1
-        target_dir = rotatepoint(root_orient, target_dir)
+        root_gheading_dir = torch.zeros_like(root_orient[...,:3])
+        root_gheading_dir[..., 0] = 1
+        root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   # global root heading direction
 
         # target_dir = target_tensor - self.root_pos
-        target_dir[..., self.UP_AXIS] = 0
-        dist = torch.linalg.norm(target_dir, ord=2, dim=-1, keepdim=True)
+        root_gheading_dir[..., self.UP_AXIS] = 0
+        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
         not_near = (dist > self.goal_radius).squeeze_(-1)
         dist = dist[not_near]
+
         if dist.nelement() < 1: return
 
-        target_dir = target_dir[not_near]
-        target_dir.div_(dist)
+        root_gheading_dir = root_gheading_dir[not_near]
+        root_gheading_dir.div_(dist)
         link_pos = self.link_pos[not_near]
-        x_dir = self.x_dir[:target_dir.size(0)]
-        q = quatdiff_normalized(x_dir, target_dir)
+
+        x_dir = self.x_dir[:root_gheading_dir.size(0)]
+        q = quatdiff_normalized(x_dir, root_gheading_dir)                 # global x-axis에서 root_gheading_dir까지의 quaternion representation of the rotation 
 
         # ensure 180 degree rotation is around the up axis
-        q = torch.where(target_dir[:, :1] < -0.99999,
+        q = torch.where(root_gheading_dir[:, :1] < -0.99999,              # root_gheading_dir이 (-1,0,0)이면 그냥 q=(0,0,1,0)
             self.reverse_rotation, q)
-        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), x_dir)
+        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), x_dir)   # GLOBAL aiming_dir (x-dir)
 
         start = link_pos[:, self.aiming_start_link]
         end = start + aiming_dir
+
         start = start.cpu().numpy()
         end = end.cpu().numpy()
         not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
@@ -1761,18 +1764,24 @@ class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
         
         target_rew = super().reward(target_tensor)
 
-        dp = target_tensor - self.root_pos
-        dp[..., self.UP_AXIS] = 0
-        dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
-        
+        # dp = target_tensor - self.root_pos
+        # dp[..., self.UP_AXIS] = 0
+        # dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
         # target_dir = dp / dist
 
         #! what I added
         root_orient = self.root_orient
-        target_dir = torch.zeros_like(root_orient[...,:3])
+        root_gheading_dir = torch.zeros_like(root_orient[...,:3])
+        root_gheading_dir[..., 0] = 1        
+        root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   # global root heading direction
         
-        q0 = quatdiff_normalized(self.x_dir, target_dir)
-        q = torch.where(target_dir[:, :1] < -0.99999,
+        root_gheading_dir[..., self.UP_AXIS] = 0
+        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
+        root_gheading_dir.div_(dist)
+        #!     
+
+        q0 = quatdiff_normalized(self.x_dir, root_gheading_dir)
+        q = torch.where(root_gheading_dir[:, :1] < -0.99999,
             self.reverse_rotation, q0)
 
         aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), self.x_dir)
@@ -1826,14 +1835,22 @@ def observe_iccgan_target_temp(state_hist: torch.Tensor, seq_len: torch.Tensor,
     # target_dir = dp / dist
 
     #! what I added
-    # root_orient = self.root_orient
-    target_dir = torch.zeros_like(root_orient[...,:3])    
-    q = quatdiff_normalized(x_dir, target_dir)
+    # 1. get root_gheading_dir as target_dir
+    root_gheading_dir = torch.zeros_like(root_orient[...,:3])    
+    root_gheading_dir[..., 0] = 1        
+    root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   # global root heading direction
+
+    # 2. erase z-component of root_gheading_dir
+    root_gheading_dir[..., UP_AXIS] = 0
+    root_dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
+    root_gheading_dir.div_(root_dist)
+
+    q = quatdiff_normalized(x_dir, root_gheading_dir)
 
     # ensure 180 degree rotation is around the up axis
     reverse = torch.zeros_like(q)
     reverse[..., UP_AXIS] = 1
-    q = torch.where(target_dir[:, :1] < -0.99999,
+    q = torch.where(root_gheading_dir[:, :1] < -0.99999,
         reverse, q)
 
     aiming_dir = quatmultiply(q, aiming_tensor)
