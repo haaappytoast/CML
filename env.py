@@ -1148,8 +1148,8 @@ class ICCGANHumanoidTargetAiming(ICCGANHumanoidTarget):
         target_hand_pos = fore_arm_pos + arm_len * aiming_dir
         e = torch.linalg.norm(target_hand_pos.sub_(hand_pos), ord=2, dim=-1).div_(arm_len.squeeze_(-1))
         aiming_rew = e.mul_(-2).exp_()
-         
-        rest_rew = fore_arm_dir[..., self.UP_AXIS].div(0.8).clip_(min=0, max=1)
+
+        rest_rew = fore_arm_dir[..., self.UP_AXIS].div(0.8).clip_(min=0, max=1) # 2nd reward to encourage character to lift its arm when aiming action is not activated
         
         aiming_rew = torch.where(self.near, rest_rew, aiming_rew).unsqueeze_(-1)
 
