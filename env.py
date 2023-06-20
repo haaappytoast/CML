@@ -1594,7 +1594,7 @@ def observe_iccgan_juggling_target(state_hist: torch.Tensor, seq_len: torch.Tens
 
     return torch.cat((ob, ball_state_l, ball_state_r, ball_state_n, timer.unsqueeze_(-1)), -1)
 
-class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
+class ICCGANHumanoidTwohands(ICCGANHumanoidTarget):
     
     GOAL_REWARD_WEIGHT = 0.25, 0.25
     GOAL_DIM = 4+3
@@ -1621,13 +1621,13 @@ class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
 
     def _observe(self, env_ids):
         if env_ids is None:
-            return observe_iccgan_target_temp(
+            return observe_iccgan_target_twohands(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
                 self.goal_tensor, self.goal_timer,
                 sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
             )
         else:
-            return observe_iccgan_target_temp(
+            return observe_iccgan_target_twohands(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
                 self.goal_tensor[env_ids], self.goal_timer[env_ids],
                 sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
@@ -1807,7 +1807,7 @@ class ICCGANHumanoidTEMP(ICCGANHumanoidTarget):
     def termination_check(self):
         return super().termination_check(self.goal_tensor[:, :3])
 
-def observe_iccgan_target_temp(state_hist: torch.Tensor, seq_len: torch.Tensor, 
+def observe_iccgan_target_twohands(state_hist: torch.Tensor, seq_len: torch.Tensor, 
     goal_tensor: torch.Tensor, timer: torch.Tensor,
     sp_upper_bound: float, goal_radius: float, fps: int
 ):
