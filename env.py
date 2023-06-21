@@ -1207,3 +1207,185 @@ def observe_iccgan_target_aiming(state_hist: torch.Tensor, seq_len: torch.Tensor
     
     return torch.cat((target_ob, aiming_dir), -1)
 
+class ICCGANHumanoidEE(ICCGANHumanoid):
+
+    GOAL_REWARD_WEIGHT = 0.5
+    GOAL_DIM = 4                    # (x, y, sp, dist)
+    GOAL_TENSOR_DIM = 3             # global position of root target (X, Y, Z) - where root should reach
+    ENABLE_GOAL_TIMER = True
+
+    GOAL_RADIUS = 0.5
+    SP_LOWER_BOUND = 1.2
+    SP_UPPER_BOUND = 1.5
+    GOAL_TIMER_RANGE = 90, 150
+    GOAL_SP_MEAN = 1
+    GOAL_SP_STD = 0.25
+    GOAL_SP_MIN = 0
+    GOAL_SP_MAX = 1.25
+
+    SHARP_TURN_RATE = 1
+
+    def __init__(self, *args, **kwargs):
+        self.goal_radius = parse_kwarg(kwargs, "goal_radius", self.GOAL_RADIUS)
+        self.sharp_turn_rate = parse_kwarg(kwargs, "sharp_turn_rate", self.SHARP_TURN_RATE)
+        self.sp_lower_bound = parse_kwarg(kwargs, "sp_lower_bound", self.SP_LOWER_BOUND)
+        self.sp_upper_bound = parse_kwarg(kwargs, "sp_upper_bound", self.SP_UPPER_BOUND)
+        self.goal_timer_range = parse_kwarg(kwargs, "goal_timer_range", self.GOAL_TIMER_RANGE)
+        self.goal_sp_mean = parse_kwarg(kwargs, "goal_sp_mean", self.GOAL_SP_MEAN)
+        self.goal_sp_std = parse_kwarg(kwargs, "goal_sp_std", self.GOAL_SP_STD)
+        self.goal_sp_min = parse_kwarg(kwargs, "goal_sp_min", self.GOAL_SP_MIN)
+        self.goal_sp_max = parse_kwarg(kwargs, "goal_sp_max", self.GOAL_SP_MAX)
+        super().__init__(*args, **kwargs)
+
+    def update_viewer(self):
+        super().update_viewer()
+        self.gym.clear_lines(self.viewer)
+        n_lines = 10
+        tar_x = self.goal_tensor[:, 0].cpu().numpy()
+
+        p = self.root_pos.cpu().numpy()
+        zero = np.zeros_like(tar_x)+0.05
+        tar_y = self.goal_tensor[:, 1].cpu().numpy()
+        lines = np.stack([
+            np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
+        for i in range(n_lines)], -2)
+        for e, l in zip(self.envs, lines):
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
+        n_lines = 10
+        target_pos = self.goal_tensor.cpu().numpy()
+        lines = np.stack([
+            np.stack((
+                target_pos[:, 0], target_pos[:, 1], zero,
+                target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
+                target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
+                zero
+            ), -1)
+        for i in range(n_lines)], -2)
+        for e, l in zip(self.envs, lines):
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
+    
+    def _observe(self, env_ids):
+        if env_ids is None:
+            return observe_iccgan_ee(
+                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
+                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+        else:
+            return observe_iccgan_ee(
+                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
+                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+
+    def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
+        #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+        
+        n_envs = len(env_ids)
+        all_envs = n_envs == len(self.envs)
+        root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
+
+        small_turn = torch.rand(n_envs, device=self.device) > self.sharp_turn_rate
+        large_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(2*np.pi)
+        small_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).sub_(0.5).mul_(2*(np.pi/3))
+
+        heading = heading_zup(root_orient)
+        small_angle += heading
+        theta = torch.where(small_turn, small_angle, large_angle)
+
+        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
+        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
+            vel = self.goal_sp_min
+        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
+            vel = self.goal_sp_mean
+        else:
+            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
+        
+        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
+        dx = dist*torch.cos(theta)
+        dy = dist*torch.sin(theta)
+
+        if all_envs:
+            self.init_dist = dist
+            goal_timer.copy_(timer)
+            goal_tensor[:,0] = self.root_pos[:,0] + dx
+            goal_tensor[:,1] = self.root_pos[:,1] + dy
+        else:
+            self.init_dist[env_ids] = dist
+            goal_timer[env_ids] = timer
+            goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
+            goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
+        
+    def reward(self, goal_tensor=None, goal_timer=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+
+        p = self.root_pos                                       # 현재 root_pos
+        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
+
+        dp_ = goal_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
+        dp_[:, self.UP_AXIS] = 0
+        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
+        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
+
+        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
+        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
+        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
+
+        dp = p - p_                                            # (현재 root - 이전 root)
+        dp[:, self.UP_AXIS] = 0
+        v = dp / self.step_time                                # current velocity: dp / duration 
+        r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
+
+        dp = goal_tensor - p
+        dp[:, self.UP_AXIS] = 0
+        dist = torch.linalg.norm(dp, ord=2, dim=-1)
+        self.near = dist < self.goal_radius
+
+        r[self.near] = 1
+        
+        if self.viewer is not None:
+            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
+        
+        return r.unsqueeze_(-1)
+
+    def termination_check(self, goal_tensor=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        fall = super().termination_check()
+        dp = goal_tensor - self.root_pos
+        dp[:, self.UP_AXIS] = 0
+        dist = dp.square_().sum(-1).sqrt_()
+        too_far = dist-self.init_dist > 3
+        return torch.logical_or(fall, too_far)
+
+
+@torch.jit.script
+def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
+    target_tensor: torch.Tensor, timer: torch.Tensor,
+    sp_upper_bound: float, fps: int
+):
+    ob = observe_iccgan(state_hist, seq_len)
+
+    root_pos = state_hist[-1, :, :3]
+    root_orient = state_hist[-1, :, 3:7]
+
+    dp = target_tensor - root_pos
+    x = dp[:, 0]
+    y = dp[:, 1]
+    heading_inv = -heading_zup(root_orient)
+    c = torch.cos(heading_inv)      # root_orientation의 x-dir의 각도 (inverse) 
+    s = torch.sin(heading_inv)
+    x, y = c*x-s*y, s*x+c*y         # [[c -s], [s c]] * [x y]^T (local_dp -> root_orient에서 바라본 dp)
+
+    dist = (x*x + y*y).sqrt_()
+    sp = dist.mul(fps/timer)        # speed! ... dist/timer->how many dist we should go per step ... dist*fps/timer -> how much distance we should go in 1 sec
+
+    too_close = dist < 1e-5
+    x = torch.where(too_close, x, x/dist)   # x/dist: normalized x
+    y = torch.where(too_close, y, y/dist)
+    sp.clip_(max=sp_upper_bound)
+    dist.div_(3).clip_(max=1.5)
+
+    return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+
+
