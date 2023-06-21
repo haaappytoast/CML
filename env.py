@@ -1211,8 +1211,8 @@ def observe_iccgan_target_aiming(state_hist: torch.Tensor, seq_len: torch.Tensor
 class ICCGANHumanoidEE(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
-    GOAL_DIM = 4                    # (x, y, sp, dist)
-    GOAL_TENSOR_DIM = 3+3            # global position of rhand target (X, Y, Z) - where rhand should reach
+    GOAL_DIM = 4                    # (x, y, z, dist)
+    GOAL_TENSOR_DIM = 3+3             # global position of rhand target (X, Y, Z) - where rhand should reach
     ENABLE_GOAL_TIMER = True
 
     GOAL_RADIUS = 0.1
@@ -1299,14 +1299,15 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         root_gheading_dir = root_gheading_dir[not_near]
         root_gheading_dir.div_(dist)
         link_pos = self.link_pos[not_near]
-        
+        reverse_rotation = self.reverse_rotation[not_near]
+
         x_dir = self.x_dir[:root_gheading_dir.size(0)]
         q = quatdiff_normalized(x_dir, root_gheading_dir)                 # global x-axis에서 root_gheading_dir까지의 quaternion representation of the rotation 
         q = torch.where(root_gheading_dir[:, :1] < -0.99999,              # root_gheading_dir이 (-1,0,0)이면 그냥 q=(0,0,1,0)
-            self.reverse_rotation, q)
+            reverse_rotation, q)
 
         # 2. rhand_aiming_tensor to rhand_aiming_dir
-        rhand_aiming_tensor = self.temp
+        rhand_aiming_tensor = self.temp[not_near]
         rhand_aiming_dir = rotatepoint(quatmultiply(q, rhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
         dist = torch.linalg.norm(rhand_aiming_dir, ord=2, dim=-1, keepdim=True)
         rhand_aiming_dir.div_(dist)                                                   # normalize dir                     
@@ -1407,50 +1408,51 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         y = sp*cy  # cr*sp*cy + sr*cp*sy
         z = cp*sy  # cr*cp*sy - sr*sp*cy
 
-        self.temp = torch.zeros((n_envs, 4), device=self.device)
+        self.temp = torch.zeros((len(self.envs), 4), device=self.device)
 
         if n_envs == len(self.envs):
-            self.temp[:, 3-3] = x
-            self.temp[:, 4-3] = y
-            self.temp[:, 5-3] = z 
-            self.temp[:, 6-3] = w
+            self.temp[:, 0] = x
+            self.temp[:, 1] = y
+            self.temp[:, 2] = z 
+            self.temp[:, 3] = w
         else:
-            self.temp[env_ids, 3-3] = x
-            self.temp[env_ids, 4-3] = y
-            self.temp[env_ids, 5-3] = z
-            self.temp[env_ids, 6-3] = w     
+            self.temp[env_ids, 0] = x
+            self.temp[env_ids, 1] = y
+            self.temp[env_ids, 2] = z
+            self.temp[env_ids, 3] = w     
         #!
 
         #! what I added for ee position
         # 1. calculate root_heading_dir as target_dir
         root_orient = self.root_orient[env_ids]
         
-        root_gheading_dir = torch.zeros_like(root_orient[...,:3])
+        root_gheading_dir = torch.zeros_like(root_orient[...,:3])         # (n_envs, 3)
         root_gheading_dir[..., 0] = 1
         root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   #! heading은 root! global root heading direction
 
         root_gheading_dir[..., self.UP_AXIS] = 0                    
-        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
+        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)    # (n_envs, 3)
         
         root_gheading_dir.div_(dist)
 
-        link_pos = self.link_pos[env_ids]
-        x_dir = torch.zeros_like(root_orient[..., :3])
+        link_pos = self.link_pos[env_ids]                                           # (n_envs, 3)                                               
+        reverse_rotation = self.reverse_rotation[env_ids]                           # (n_envs, 3)
+
+        x_dir = torch.zeros_like(root_orient[..., :3])                              # (n_envs, 3)
         x_dir[..., 0] = 1
         x_dir = x_dir[:root_gheading_dir.size(0)]
         q = quatdiff_normalized(x_dir, root_gheading_dir)                 # global x-axis에서 root_gheading_dir까지의 quaternion representation of the rotation 
+
         q = torch.where(root_gheading_dir[:, :1] < -0.99999,              # root_gheading_dir이 (-1,0,0)이면 그냥 q=(0,0,1,0)
-            self.reverse_rotation, q)
+            reverse_rotation, q)
 
         # 2. rhand_aiming_tensor to rhand_aiming_dir
-        rhand_aiming_tensor = self.temp
-        rhand_aiming_dir = rotatepoint(quatmultiply(q, rhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
+        rhand_aiming_tensor = self.temp[env_ids]                            # (n_envs, 3)
+        rhand_aiming_dir = rotatepoint(quatmultiply(q, rhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir) # (n_envs, 3)
         dist = torch.linalg.norm(rhand_aiming_dir, ord=2, dim=-1, keepdim=True)
         rhand_aiming_dir.div_(dist)                                                   # normalize dir                     
 
         start = link_pos[:, self.aiming_start_link]                        #! start는 head
-        end = start + rhand_aiming_dir
-
         rarm_offset, larm_offset = self.rarm_len.item(), self.larm_len.item()
         r_end = start + rhand_aiming_dir * rarm_offset                     #! shape: (n_envs, 3)
 
@@ -1496,6 +1498,18 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         if self.viewer is not None:
             self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
         
+        target_rhand_pos = goal_tensor[..., :3]
+        rhand_pos = self.link_pos[:, self.r_aiming_end_link]
+        dp_hand = target_rhand_pos - rhand_pos
+
+        rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
+        rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
+        rarm_len = rarm_len.repeat(len(self.envs))
+
+        e = torch.linalg.norm(target_rhand_pos.sub_(rhand_pos), ord=2, dim=-1).div_(rarm_len)
+
+        # dist_hand = torch.linalg.norm(dp_hand, ord=2, dim=-1)
+
         return r.unsqueeze_(-1)
 
     def termination_check(self, goal_tensor=None):
