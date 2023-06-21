@@ -1258,29 +1258,29 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
     def update_viewer(self):
         super().update_viewer()
         self.gym.clear_lines(self.viewer)
-        n_lines = 10
-        tar_x = self.goal_tensor[:, 0].cpu().numpy()
+        # n_lines = 10
+        # tar_x = self.goal_tensor[:, 0].cpu().numpy()
 
-        p = self.root_pos.cpu().numpy()
-        zero = np.zeros_like(tar_x)+0.05
-        tar_y = self.goal_tensor[:, 1].cpu().numpy()
-        lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
-        for i in range(n_lines)], -2)
-        for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
-        n_lines = 10
-        target_pos = self.goal_tensor[:, 0:3].cpu().numpy()
-        lines = np.stack([
-            np.stack((
-                target_pos[:, 0], target_pos[:, 1], zero,
-                target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
-                target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
-                zero
-            ), -1)
-        for i in range(n_lines)], -2)
-        for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
+        # p = self.root_pos.cpu().numpy()
+        # zero = np.zeros_like(tar_x)+0.05
+        # tar_y = self.goal_tensor[:, 1].cpu().numpy()
+        # lines = np.stack([
+        #     np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
+        # for i in range(n_lines)], -2)
+        # for e, l in zip(self.envs, lines):
+        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
+        # n_lines = 10
+        # target_pos = self.goal_tensor[:, 0:3].cpu().numpy()
+        # lines = np.stack([
+        #     np.stack((
+        #         target_pos[:, 0], target_pos[:, 1], zero,
+        #         target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
+        #         target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
+        #         zero
+        #     ), -1)
+        # for i in range(n_lines)], -2)
+        # for e, l in zip(self.envs, lines):
+        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
     
         #! what I added for ee position
         # 1. calculate root_heading_dir as target_dir
