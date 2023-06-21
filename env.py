@@ -5,6 +5,7 @@ from isaacgym import gymapi, gymtorch
 import torch
 import utils
 from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized
+from isaacgym import gymutil
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
     return kwargs[key] if key in kwargs else default_val
@@ -1211,10 +1212,10 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
     GOAL_DIM = 4                    # (x, y, sp, dist)
-    GOAL_TENSOR_DIM = 3             # global position of root target (X, Y, Z) - where root should reach
+    GOAL_TENSOR_DIM = 3             # global position of rhand target (X, Y, Z) - where rhand should reach
     ENABLE_GOAL_TIMER = True
 
-    GOAL_RADIUS = 0.5
+    GOAL_RADIUS = 0.1
     SP_LOWER_BOUND = 1.2
     SP_UPPER_BOUND = 1.5
     GOAL_TIMER_RANGE = 90, 150
@@ -1236,6 +1237,23 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         self.goal_sp_min = parse_kwarg(kwargs, "goal_sp_min", self.GOAL_SP_MIN)
         self.goal_sp_max = parse_kwarg(kwargs, "goal_sp_max", self.GOAL_SP_MAX)
         super().__init__(*args, **kwargs)
+
+        # get_link_len
+        rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
+        self.rarm_len, self.larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
+
+    def create_tensors(self):
+        super().create_tensors()
+        self.r_hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_hand")
+        self.head = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "head")
+
+        self.aiming_start_link = self.head
+        self.r_aiming_end_link = self.r_hand_link
+
+        self.x_dir = torch.zeros_like(self.root_pos)
+        self.x_dir[..., 0] = 1
+        self.reverse_rotation = torch.zeros_like(self.root_orient)
+        self.reverse_rotation[..., self.UP_AXIS] = 1
 
     def update_viewer(self):
         super().update_viewer()
@@ -1264,6 +1282,61 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         for e, l in zip(self.envs, lines):
             self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
     
+        #! what I added for ee position
+        # 1. calculate root_heading_dir as target_dir
+        root_orient = self.root_orient
+        root_gheading_dir = torch.zeros_like(root_orient[...,:3])
+        root_gheading_dir[..., 0] = 1
+        root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   #! heading은 root! global root heading direction
+
+        root_gheading_dir[..., self.UP_AXIS] = 0                    
+        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
+
+        not_near = (dist > self.goal_radius).squeeze_(-1)
+        dist = dist[not_near]
+        if dist.nelement() < 1: return
+
+        root_gheading_dir = root_gheading_dir[not_near]
+        root_gheading_dir.div_(dist)
+        link_pos = self.link_pos[not_near]
+        
+        x_dir = self.x_dir[:root_gheading_dir.size(0)]
+        q = quatdiff_normalized(x_dir, root_gheading_dir)                 # global x-axis에서 root_gheading_dir까지의 quaternion representation of the rotation 
+        q = torch.where(root_gheading_dir[:, :1] < -0.99999,              # root_gheading_dir이 (-1,0,0)이면 그냥 q=(0,0,1,0)
+            self.reverse_rotation, q)
+
+        # 2. rhand_aiming_tensor to rhand_aiming_dir
+        rhand_aiming_tensor = self.temp
+        rhand_aiming_dir = rotatepoint(quatmultiply(q, rhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
+        dist = torch.linalg.norm(rhand_aiming_dir, ord=2, dim=-1, keepdim=True)
+        rhand_aiming_dir.div_(dist)                                                   # normalize dir                     
+
+        start = link_pos[:, self.aiming_start_link]                        #! start는 head
+        end = start + rhand_aiming_dir
+
+        rarm_offset, larm_offset = self.rarm_len.item(), self.larm_len.item()
+        r_end = start + rhand_aiming_dir * rarm_offset
+        start = start.cpu().numpy()
+        end = end.cpu().numpy()
+        r_end = r_end.cpu().numpy()
+
+        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
+        n_lines = 10
+
+        lines = np.stack([
+            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, end[:, 0], end[:, 1], end[:,2]+0.005*i), -1)
+        for i in range(-n_lines//2, n_lines//2)], -2)
+        for i, l in zip(not_near, lines):
+            e = self.envs[i]
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
+
+        for i in range(len(self.envs)):
+            rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0, 0))   # red
+            rhand_pos = r_end[i]
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
+            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
+        #!
+
     def _observe(self, env_ids):
         if env_ids is None:
             return observe_iccgan_ee(
@@ -1316,6 +1389,37 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
             goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
         
+
+        #! what I added for ee position
+        n_envs = len(env_ids)
+        elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        azim = torch.ones(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        elev /= 2
+        azim /= 2
+        cp = torch.cos(elev) # y
+        sp = torch.sin(elev)
+        cy = torch.cos(azim) # z
+        sy = torch.sin(azim)
+
+        w = cp*cy  # cr*cp*cy + sr*sp*sy
+        x = -sp*sy # sr*cp*cy - cr*sp*sy
+        y = sp*cy  # cr*sp*cy + sr*cp*sy
+        z = cp*sy  # cr*cp*sy - sr*sp*cy
+
+        self.temp = torch.zeros((n_envs, 4), device=self.device)
+        print("env_ids: ", env_ids)
+        if n_envs == len(self.envs):
+            self.temp[:, 3-3] = x
+            self.temp[:, 4-3] = y
+            self.temp[:, 5-3] = z 
+            self.temp[:, 6-3] = w
+        else:
+            self.temp[env_ids, 3-3] = x
+            self.temp[env_ids, 4-3] = y
+            self.temp[env_ids, 5-3] = z
+            self.temp[env_ids, 6-3] = w        
+        #!
+
     def reward(self, goal_tensor=None, goal_timer=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
