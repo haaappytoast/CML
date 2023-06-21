@@ -1212,7 +1212,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
     GOAL_DIM = 4                    # (x, y, sp, dist)
-    GOAL_TENSOR_DIM = 3             # global position of rhand target (X, Y, Z) - where rhand should reach
+    GOAL_TENSOR_DIM = 3+3            # global position of rhand target (X, Y, Z) - where rhand should reach
     ENABLE_GOAL_TIMER = True
 
     GOAL_RADIUS = 0.1
@@ -1319,7 +1319,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         start = start.cpu().numpy()
         end = end.cpu().numpy()
         r_end = r_end.cpu().numpy()
-        r_end = self.temp2.cpu().numpy()
+        r_end = self.goal_tensor[:, 3:6].cpu().numpy()
 
         not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
         n_lines = 10
@@ -1454,16 +1454,15 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         rarm_offset, larm_offset = self.rarm_len.item(), self.larm_len.item()
         r_end = start + rhand_aiming_dir * rarm_offset                     #! shape: (n_envs, 3)
 
-        self.temp2 = torch.zeros((n_envs, 3), device=self.device)
+        # self.temp2 = torch.zeros((n_envs, 3), device=self.device)
         if n_envs == len(self.envs):
-            self.temp2[:, 0] = r_end[:, 0]
-            self.temp2[:, 1] = r_end[:, 1]
-            self.temp2[:, 2] = r_end[:, 2]
+            goal_tensor[:, 0+3] = r_end[:, 0]
+            goal_tensor[:, 1+3] = r_end[:, 1]
+            goal_tensor[:, 2+3] = r_end[:, 2]
         else:
-            self.temp2[env_ids, 0] = r_end[:, 0]
-            self.temp2[env_ids, 1] = r_end[:, 1]
-            self.temp2[env_ids, 2] = r_end[:, 2]
-
+            goal_tensor[env_ids, 0+3] = r_end[:, 0]
+            goal_tensor[env_ids, 1+3] = r_end[:, 1]
+            goal_tensor[env_ids, 2+3] = r_end[:, 2]
         #!
 
     def reward(self, goal_tensor=None, goal_timer=None):
@@ -1473,7 +1472,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         p = self.root_pos                                       # 현재 root_pos
         p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
 
-        dp_ = goal_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
+        dp_ = goal_tensor[..., :3] - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
         dp_[:, self.UP_AXIS] = 0
         dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
         v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
@@ -1487,7 +1486,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         v = dp / self.step_time                                # current velocity: dp / duration 
         r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
 
-        dp = goal_tensor - p
+        dp = goal_tensor[..., :3] - p
         dp[:, self.UP_AXIS] = 0
         dist = torch.linalg.norm(dp, ord=2, dim=-1)
         self.near = dist < self.goal_radius
@@ -1502,7 +1501,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
     def termination_check(self, goal_tensor=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
         fall = super().termination_check()
-        dp = goal_tensor - self.root_pos
+        dp = goal_tensor[..., :3] - self.root_pos
         dp[:, self.UP_AXIS] = 0
         dist = dp.square_().sum(-1).sqrt_()
         too_far = dist-self.init_dist > 3
@@ -1519,7 +1518,7 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     root_pos = state_hist[-1, :, :3]
     root_orient = state_hist[-1, :, 3:7]
 
-    dp = target_tensor - root_pos
+    dp = target_tensor[..., :3] - root_pos
     x = dp[:, 0]
     y = dp[:, 1]
     heading_inv = -heading_zup(root_orient)
