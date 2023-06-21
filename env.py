@@ -1215,7 +1215,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
     GOAL_TENSOR_DIM = 3+3             # global position of rhand target (X, Y, Z) - where rhand should reach
     ENABLE_GOAL_TIMER = True
 
-    GOAL_RADIUS = 0.1
+    GOAL_RADIUS = 0.5
     SP_LOWER_BOUND = 1.2
     SP_UPPER_BOUND = 1.5
     GOAL_TIMER_RANGE = 90, 150
@@ -1270,7 +1270,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         for e, l in zip(self.envs, lines):
             self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
         n_lines = 10
-        target_pos = self.goal_tensor.cpu().numpy()
+        target_pos = self.goal_tensor[:, 0:3].cpu().numpy()
         lines = np.stack([
             np.stack((
                 target_pos[:, 0], target_pos[:, 1], zero,
