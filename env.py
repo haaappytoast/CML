@@ -1498,18 +1498,18 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         if self.viewer is not None:
             self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
         
-        target_rhand_pos = goal_tensor[..., :3]
-        rhand_pos = self.link_pos[:, self.r_aiming_end_link]
-        dp_hand = target_rhand_pos - rhand_pos
+        #! I added
+        # target_rhand_pos = goal_tensor[..., 3:6]
+        # rhand_pos = self.link_pos[:, self.r_aiming_end_link]
+        # dp_hand = target_rhand_pos - rhand_pos
 
-        rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
-        rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
-        rarm_len = rarm_len.repeat(len(self.envs))
+        # rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
+        # rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
+        # rarm_len = rarm_len.repeat(len(self.envs))
 
-        e = torch.linalg.norm(target_rhand_pos.sub_(rhand_pos), ord=2, dim=-1).div_(rarm_len)
-
+        # e = torch.linalg.norm(target_rhand_pos.sub_(rhand_pos), ord=2, dim=-1).div_(rarm_len)
         # dist_hand = torch.linalg.norm(dp_hand, ord=2, dim=-1)
-
+        #! I added
         return r.unsqueeze_(-1)
 
     def termination_check(self, goal_tensor=None):
