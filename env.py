@@ -1534,7 +1534,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         #!
 
         #! ADDED lhand position
-        lhand_aiming_tensor = self.temp2
+        lhand_aiming_tensor = self.temp2[env_ids]
         lhand_aiming_dir = rotatepoint(quatmultiply(q, lhand_aiming_tensor), x_dir)   # GLOBAL lhand_aiming_dir (x-dir)
         l_dist = torch.linalg.norm(lhand_aiming_dir, ord=2, dim=-1, keepdim=True)
         lhand_aiming_dir.div_(l_dist)                                                   # normalize dir                     
