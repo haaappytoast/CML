@@ -1356,6 +1356,8 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         start = start.cpu().numpy()
         l_aim = l_aim.cpu().numpy()
         l_end = l_end.cpu().numpy()
+        l_end = self.ltemp.cpu().numpy()
+
         # l_end = self.goal_tensor[:, 3:6].cpu().numpy()
 
         not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
@@ -1532,6 +1534,24 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             goal_tensor[env_ids, 2] = r_end[:, 2]
         #!
 
+        #! ADDED lhand position
+        lhand_aiming_tensor = self.temp2
+        lhand_aiming_dir = rotatepoint(quatmultiply(q, lhand_aiming_tensor), x_dir)   # GLOBAL lhand_aiming_dir (x-dir)
+        l_dist = torch.linalg.norm(lhand_aiming_dir, ord=2, dim=-1, keepdim=True)
+        lhand_aiming_dir.div_(l_dist)                                                   # normalize dir                     
+
+        l_end = start + lhand_aiming_dir * larm_offset                     #! shape: (n_envs, 3)
+
+        self.ltemp = torch.zeros((n_envs, 3), device=self.device)
+        if n_envs == len(self.envs):
+            self.ltemp[:, 0] = l_end[:, 0]
+            self.ltemp[:, 1] = l_end[:, 1]
+            self.ltemp[:, 2] = l_end[:, 2]
+        else:
+            self.ltemp[env_ids, 0] = l_end[:, 0]
+            self.ltemp[env_ids, 1] = l_end[:, 1]
+            self.ltemp[env_ids, 2] = l_end[:, 2]
+        #!
     def reward(self, goal_tensor=None, goal_timer=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
