@@ -1249,6 +1249,10 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         self.aiming_start_link = self.head
         self.r_aiming_end_link = self.r_hand_link
 
+        # left hand added
+        self.l_hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "left_hand")
+        self.l_aiming_end_link = self.l_hand_link
+
         self.x_dir = torch.zeros_like(self.root_pos)
         self.x_dir[..., 0] = 1
         self.reverse_rotation = torch.zeros_like(self.root_orient)
@@ -1312,12 +1316,12 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         rhand_aiming_dir.div_(dist)                                                   # normalize dir                     
 
         start = link_pos[:, self.aiming_start_link]                        #! start는 head
-        end = start + rhand_aiming_dir
+        r_aim = start + rhand_aiming_dir
 
         rarm_offset, larm_offset = self.rarm_len.item(), self.larm_len.item()
         r_end = start + rhand_aiming_dir * rarm_offset
         start = start.cpu().numpy()
-        end = end.cpu().numpy()
+        r_aim = r_aim.cpu().numpy()
         r_end = r_end.cpu().numpy()
         r_end = self.goal_tensor[:, 0:3].cpu().numpy()
 
@@ -1325,7 +1329,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         n_lines = 10
 
         lines = np.stack([
-            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, end[:, 0], end[:, 1], end[:,2]+0.005*i), -1)
+            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, r_aim[:, 0], r_aim[:, 1], r_aim[:,2]+0.005*i), -1)
         for i in range(-n_lines//2, n_lines//2)], -2)
         for i, l in zip(not_near, lines):
             e = self.envs[i]
@@ -1336,6 +1340,38 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             rhand_pos = r_end[i]
             rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
+        #!
+
+        # 2. lhand_aiming_tensor to lhand_aiming_dir
+        not_near = (dist > self.goal_radius).squeeze_(-1)
+        lhand_aiming_tensor = self.temp2[not_near]
+        lhand_aiming_dir = rotatepoint(quatmultiply(q, lhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
+        l_dist = torch.linalg.norm(lhand_aiming_dir, ord=2, dim=-1, keepdim=True)
+        lhand_aiming_dir.div_(l_dist)                                                   # normalize dir                     
+        start = link_pos[:, self.aiming_start_link]                        #! start는 head
+        l_aim = start + lhand_aiming_dir
+
+        l_end = start + lhand_aiming_dir * larm_offset
+
+        start = start.cpu().numpy()
+        l_aim = l_aim.cpu().numpy()
+        l_end = l_end.cpu().numpy()
+        # l_end = self.goal_tensor[:, 3:6].cpu().numpy()
+
+        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
+
+        lines = np.stack([
+            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, l_aim[:, 0], l_aim[:, 1], l_aim[:,2]+0.005*i), -1)
+        for i in range(-n_lines//2, n_lines//2)], -2)
+        for i, l in zip(not_near, lines):
+            e = self.envs[i]
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])
+
+        for i in range(len(self.envs)):
+            lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 1, 0))   # green
+            lhand_pos = l_end[i]
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   
         #!
 
     def _observe(self, env_ids):
@@ -1419,6 +1455,36 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             self.temp[env_ids, 1] = y
             self.temp[env_ids, 2] = z
             self.temp[env_ids, 3] = w     
+        #!
+
+        #! what I added for ee position
+        n_envs = len(env_ids)
+        l_elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/2)
+        l_azim = torch.ones(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/2)
+        l_elev /= 2
+        l_azim /= 2
+        l_cp = torch.cos(l_elev) # y
+        l_sp = torch.sin(l_elev)
+        l_cy = torch.cos(l_azim) # z
+        l_sy = torch.sin(l_azim)
+
+        l_w = l_cp*l_cy  # cr*cp*cy + sr*sp*sy
+        l_x = -l_sp*l_sy # sr*cp*cy - cr*sp*sy
+        l_y = l_sp*l_cy  # cr*sp*cy + sr*cp*sy
+        l_z = l_cp*l_sy  # cr*cp*sy - sr*sp*cy
+
+        self.temp2 = torch.zeros((len(self.envs), 4), device=self.device)
+
+        if n_envs == len(self.envs):
+            self.temp2[:, 0] = l_x
+            self.temp2[:, 1] = l_y
+            self.temp2[:, 2] = l_z 
+            self.temp2[:, 3] = l_w
+        else:
+            self.temp2[env_ids, 0] = l_x
+            self.temp2[env_ids, 1] = l_y
+            self.temp2[env_ids, 2] = l_z
+            self.temp2[env_ids, 3] = l_w     
         #!
 
         #! what I added for ee position
