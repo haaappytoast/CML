@@ -606,7 +606,7 @@ class ICCGANHumanoid(Env):
 
         ob_disc_dim = 13 + n_links*13
         self.state_hist = torch.empty((self.ob_horizon+1, len(self.envs), ob_disc_dim),
-            dtype=self.root_tensor.dtype, device=self.device)
+            dtype=self.root_tensor.dtype, device=self.device)                           # [5, NUM_ENVS, 13 + n_links*13]
 
         if self.goal_tensor_dim:
             try:
@@ -1026,9 +1026,9 @@ class ICCGANHumanoidTargetAiming(ICCGANHumanoidTarget):
         super().create_tensors()
         self.hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_hand")
         self.lower_arm_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_lower_arm")
-
         self.aiming_start_link = self.lower_arm_link
         self.aiming_end_link = self.hand_link
+
 
         self.x_dir = torch.zeros_like(self.root_pos)
         self.x_dir[..., 0] = 1
@@ -1212,7 +1212,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
     GOAL_DIM = 4                    # (x, y, z, dist)
-    GOAL_TENSOR_DIM = 3+3             # global position of rhand target (X, Y, Z) - where rhand should reach
+    GOAL_TENSOR_DIM = 3             # global position of rhand target (X, Y, Z) - where rhand should reach
     ENABLE_GOAL_TIMER = True
 
     GOAL_RADIUS = 0.5
@@ -1246,7 +1246,6 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         super().create_tensors()
         self.r_hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_hand")
         self.head = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "head")
-
         self.aiming_start_link = self.head
         self.r_aiming_end_link = self.r_hand_link
 
@@ -1320,7 +1319,7 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         start = start.cpu().numpy()
         end = end.cpu().numpy()
         r_end = r_end.cpu().numpy()
-        r_end = self.goal_tensor[:, 3:6].cpu().numpy()
+        r_end = self.goal_tensor[:, 0:3].cpu().numpy()
 
         not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
         n_lines = 10
@@ -1383,13 +1382,13 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         if all_envs:
             self.init_dist = dist
             goal_timer.copy_(timer)
-            goal_tensor[:,0] = self.root_pos[:,0] + dx
-            goal_tensor[:,1] = self.root_pos[:,1] + dy
+            # goal_tensor[:,0] = self.root_pos[:,0] + dx
+            # goal_tensor[:,1] = self.root_pos[:,1] + dy
         else:
             self.init_dist[env_ids] = dist
             goal_timer[env_ids] = timer
-            goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
-            goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
+            # goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
+            # goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
         
 
         #! what I added for ee position
@@ -1458,13 +1457,13 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
 
         # self.temp2 = torch.zeros((n_envs, 3), device=self.device)
         if n_envs == len(self.envs):
-            goal_tensor[:, 0+3] = r_end[:, 0]
-            goal_tensor[:, 1+3] = r_end[:, 1]
-            goal_tensor[:, 2+3] = r_end[:, 2]
+            goal_tensor[:, 0] = r_end[:, 0]
+            goal_tensor[:, 1] = r_end[:, 1]
+            goal_tensor[:, 2] = r_end[:, 2]
         else:
-            goal_tensor[env_ids, 0+3] = r_end[:, 0]
-            goal_tensor[env_ids, 1+3] = r_end[:, 1]
-            goal_tensor[env_ids, 2+3] = r_end[:, 2]
+            goal_tensor[env_ids, 0] = r_end[:, 0]
+            goal_tensor[env_ids, 1] = r_end[:, 1]
+            goal_tensor[env_ids, 2] = r_end[:, 2]
         #!
 
     def reward(self, goal_tensor=None, goal_timer=None):
@@ -1499,37 +1498,41 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
         
         #! I added
-        # target_rhand_pos = goal_tensor[..., 3:6]
-        # rhand_pos = self.link_pos[:, self.r_aiming_end_link]
-        # dp_hand = target_rhand_pos - rhand_pos
+        target_rhand_pos = goal_tensor[..., :3]
+        rhand_pos = self.link_pos[:, self.r_aiming_end_link]
+        dp_hand = target_rhand_pos - rhand_pos
 
-        # rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
-        # rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
-        # rarm_len = rarm_len.repeat(len(self.envs))
+        rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
+        rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
+        rarm_len = rarm_len.repeat(len(self.envs))
+        
+        #! 이건 near 생각해보기!
+        dist_hand = torch.linalg.norm(dp_hand, ord=2, dim=-1)
+        e = torch.linalg.norm(target_rhand_pos.sub(rhand_pos), ord=2, dim=-1).div_(rarm_len)
+        rhand_rew = e.mul_(-2).exp_()
 
-        # e = torch.linalg.norm(target_rhand_pos.sub_(rhand_pos), ord=2, dim=-1).div_(rarm_len)
-        # dist_hand = torch.linalg.norm(dp_hand, ord=2, dim=-1)
         #! I added
-        return r.unsqueeze_(-1)
-
+        # return r.unsqueeze_(-1)
+        return rhand_rew.unsqueeze_(-1)
+    
     def termination_check(self, goal_tensor=None):
-        if goal_tensor is None: goal_tensor = self.goal_tensor
-        fall = super().termination_check()
-        dp = goal_tensor[..., :3] - self.root_pos
-        dp[:, self.UP_AXIS] = 0
-        dist = dp.square_().sum(-1).sqrt_()
-        too_far = dist-self.init_dist > 3
-        return torch.logical_or(fall, too_far)
-
+        # if goal_tensor is None: goal_tensor = self.goal_tensor
+        # fall = super().termination_check()
+        # dp = goal_tensor[..., :3] - self.root_pos
+        # dp[:, self.UP_AXIS] = 0
+        # dist = dp.square_().sum(-1).sqrt_()
+        # too_far = dist-self.init_dist > 3
+        # return torch.logical_or(fall, too_far)
+        return super().termination_check()
 
 @torch.jit.script
 def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     target_tensor: torch.Tensor, timer: torch.Tensor,
     sp_upper_bound: float, fps: int
 ):
-    ob = observe_iccgan(state_hist, seq_len)
-
-    root_pos = state_hist[-1, :, :3]
+    ob = observe_iccgan(state_hist, seq_len)    # state_hist = [ob_horizon, NUM_ENVS, 13 * nlink*13]
+    
+    root_pos = state_hist[-1, :, :3]            #  (1, NUM_ENVS, disc_obs) root global pos of last frame
     root_orient = state_hist[-1, :, 3:7]
 
     dp = target_tensor[..., :3] - root_pos
@@ -1549,6 +1552,33 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     sp.clip_(max=sp_upper_bound)
     dist.div_(3).clip_(max=1.5)
 
-    return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+    #! what I added
+    rhand_idx = 5
+    start_idx = 13 + rhand_idx*13
+    rhand_pos = state_hist[-1, :, start_idx:start_idx+3]
+    rhand_orient = state_hist[-1, :, start_idx+3:start_idx+7]
+
+    rhand_dp = target_tensor[..., :3] - rhand_pos                       # N x 3
+
+    # calculate root_heading
+    UP_AXIS = 2
+    origin = root_pos.clone()                                           # N x 3
+    origin[..., UP_AXIS] = 0     
+    heading = heading_zup(root_orient)                                  # N
+    up_dir = torch.zeros_like(origin)                                   # N x 3
+    up_dir[..., UP_AXIS] = 1
+    
+    #! 요부분은 다시 생각해보기! -> 왜냐면 origin에서 시작되는 vector가 아니니까 맞는지 모르겠음!
+    heading_orient_inv = axang2quat(up_dir, -heading)                   # N x 4
+
+    # change x,y,z into root orient
+    rhand_local_dp = rotatepoint(heading_orient_inv, rhand_dp)                                      # N x 3
+    local_x, local_y, local_z = rhand_local_dp[:, 0], rhand_local_dp[:, 1], rhand_local_dp[:, 2]    # N
+
+    rhand_dist = (local_x*local_x + local_y*local_y + local_z*local_z).sqrt_()                      # N
+
+    #! what I added
+    # return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+    return torch.cat((ob, local_x.unsqueeze_(-1), local_y.unsqueeze_(-1), local_z.unsqueeze_(-1), rhand_dist.unsqueeze_(-1)), -1)
 
 
