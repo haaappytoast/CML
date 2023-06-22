@@ -1211,7 +1211,7 @@ def observe_iccgan_target_aiming(state_hist: torch.Tensor, seq_len: torch.Tensor
 class ICCGANHumanoidEE(ICCGANHumanoid):
 
     GOAL_REWARD_WEIGHT = 0.5
-    GOAL_DIM = 4                    # (x, y, z, dist)
+    GOAL_DIM = 4+4                   # (x, y, z, dist) of rhand, lhand
     GOAL_TENSOR_DIM = 3+3           # global position of rhand, lhand target (X, Y, Z) - where rhand, lhand should reach
     ENABLE_GOAL_TIMER = True
 
@@ -1597,8 +1597,23 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         rhand_rew = e.mul_(-2).exp_()
 
         #! I added
+
+        #! ADDED lhand reward
+        target_lhand_pos = goal_tensor[..., 3:6]
+        lhand_pos = self.link_pos[:, self.l_aiming_end_link]
+        dp_lhand = target_lhand_pos - lhand_pos
+
+        larm_len = larm_len.repeat(len(self.envs))
+        
+        #! 이건 near 생각해보기!
+        dist_lhand = torch.linalg.norm(dp_lhand, ord=2, dim=-1)
+        l_e = torch.linalg.norm(target_lhand_pos.sub(lhand_pos), ord=2, dim=-1).div_(larm_len)
+        lhand_rew = l_e.mul_(-2).exp_()
+        #! ADDED lhand reward
+
+        total_r = (0.5 * rhand_rew + 0.5 * lhand_rew)
         # return r.unsqueeze_(-1)
-        return rhand_rew.unsqueeze_(-1)
+        return total_r.unsqueeze_(-1)
 
     def termination_check(self, goal_tensor=None):
         # if goal_tensor is None: goal_tensor = self.goal_tensor
@@ -1663,7 +1678,27 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     rhand_dist = (local_x*local_x + local_y*local_y + local_z*local_z).sqrt_()                      # N
 
     #! what I added
+
+    #! ADDED lhand reward
+    # 1. get lhand_dp (target_pos - left hand current pos)
+    lhand_idx = 8
+    lstart_idx = 13 + lhand_idx*13
+    lhand_pos = state_hist[-1, :, lstart_idx:lstart_idx+3]
+    lhand_orient = state_hist[-1, :, lstart_idx+3:lstart_idx+7]
+
+    lhand_dp = target_tensor[..., 3:6] - lhand_pos                      # N x 3
+    
+    # 2. calculate root_heading -> already done in rhand part 
+
+    # 3. change x,y,z into root orient
+    lhand_local_dp = rotatepoint(heading_orient_inv, lhand_dp)                                      # N x 3
+    local_l_x, local_l_y, local_l_z = lhand_local_dp[:, 0], lhand_local_dp[:, 1], lhand_local_dp[:, 2]    # N
+
+    lhand_dist = (local_l_x*local_l_x + local_l_y*local_l_y + local_l_z*local_l_z).sqrt_()                      # N
+    #! ADDED lhand reward
+
     # return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
-    return torch.cat((ob, local_x.unsqueeze_(-1), local_y.unsqueeze_(-1), local_z.unsqueeze_(-1), rhand_dist.unsqueeze_(-1)), -1)
+    return torch.cat((ob, local_x.unsqueeze_(-1), local_y.unsqueeze_(-1), local_z.unsqueeze_(-1), rhand_dist.unsqueeze_(-1), 
+                        local_l_x.unsqueeze_(-1), local_l_y.unsqueeze_(-1), local_l_z.unsqueeze_(-1), lhand_dist.unsqueeze_(-1)), -1)
 
 
