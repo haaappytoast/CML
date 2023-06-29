@@ -1261,79 +1261,11 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
     def update_viewer(self):
         super().update_viewer()
         self.gym.clear_lines(self.viewer)
-        # n_lines = 10
-        # tar_x = self.goal_tensor[:, 0].cpu().numpy()
 
-        # p = self.root_pos.cpu().numpy()
-        # zero = np.zeros_like(tar_x)+0.05
-        # tar_y = self.goal_tensor[:, 1].cpu().numpy()
-        # lines = np.stack([
-        #     np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
-        # for i in range(n_lines)], -2)
-        # for e, l in zip(self.envs, lines):
-        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
-        # n_lines = 10
-        # target_pos = self.goal_tensor[:, 0:3].cpu().numpy()
-        # lines = np.stack([
-        #     np.stack((
-        #         target_pos[:, 0], target_pos[:, 1], zero,
-        #         target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
-        #         target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
-        #         zero
-        #     ), -1)
-        # for i in range(n_lines)], -2)
-        # for e, l in zip(self.envs, lines):
-        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
-    
         #! what I added for ee position
-        # 1. calculate root_heading_dir as target_dir
-        root_orient = self.root_orient
-        root_gheading_dir = torch.zeros_like(root_orient[...,:3])
-        root_gheading_dir[..., 0] = 1
-        root_gheading_dir = rotatepoint(root_orient, root_gheading_dir)   #! heading은 root! global root heading direction
-
-        root_gheading_dir[..., self.UP_AXIS] = 0                    
-        dist = torch.linalg.norm(root_gheading_dir, ord=2, dim=-1, keepdim=True)
-
-        not_near = (dist > self.goal_radius).squeeze_(-1)
-        dist = dist[not_near]
-        if dist.nelement() < 1: return
-
-        root_gheading_dir = root_gheading_dir[not_near]
-        root_gheading_dir.div_(dist)
-        link_pos = self.link_pos[not_near]
-        reverse_rotation = self.reverse_rotation[not_near]
-
-        x_dir = self.x_dir[:root_gheading_dir.size(0)]
-        q = quatdiff_normalized(x_dir, root_gheading_dir)                 # global x-axis에서 root_gheading_dir까지의 quaternion representation of the rotation 
-        q = torch.where(root_gheading_dir[:, :1] < -0.99999,              # root_gheading_dir이 (-1,0,0)이면 그냥 q=(0,0,1,0)
-            reverse_rotation, q)
-
-        # 2. rhand_aiming_tensor to rhand_aiming_dir
-        rhand_aiming_tensor = self.temp[not_near]
-        rhand_aiming_dir = rotatepoint(quatmultiply(q, rhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
-        dist = torch.linalg.norm(rhand_aiming_dir, ord=2, dim=-1, keepdim=True)
-        rhand_aiming_dir.div_(dist)                                                   # normalize dir                     
-
-        start = link_pos[:, self.aiming_start_link]                        #! start는 head
-        r_aim = start + rhand_aiming_dir
-
-        rarm_offset, larm_offset = self.rarm_len.item(), self.larm_len.item()
-        r_end = start + rhand_aiming_dir * rarm_offset
-        start = start.cpu().numpy()
-        r_aim = r_aim.cpu().numpy()
-        r_end = r_end.cpu().numpy()
+        # 1. rhand visualization
+        link_pos = self.link_pos
         r_end = self.goal_tensor[:, 0:3].cpu().numpy()
-
-        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
-        n_lines = 10
-
-        lines = np.stack([
-            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, r_aim[:, 0], r_aim[:, 1], r_aim[:,2]+0.005*i), -1)
-        for i in range(-n_lines//2, n_lines//2)], -2)
-        for i, l in zip(not_near, lines):
-            e = self.envs[i]
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
 
         for i in range(len(self.envs)):
             rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0, 0))   # red
@@ -1342,32 +1274,8 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
         #!
 
-        # 2. lhand_aiming_tensor to lhand_aiming_dir
-        not_near = (dist > self.goal_radius).squeeze_(-1)
-        lhand_aiming_tensor = self.temp2[not_near]
-        lhand_aiming_dir = rotatepoint(quatmultiply(q, lhand_aiming_tensor), x_dir)   # GLOBAL rhand_aiming_dir (x-dir)
-        l_dist = torch.linalg.norm(lhand_aiming_dir, ord=2, dim=-1, keepdim=True)
-        lhand_aiming_dir.div_(l_dist)                                                   # normalize dir                     
-        start = link_pos[:, self.aiming_start_link]                        #! start는 head
-        l_aim = start + lhand_aiming_dir
-
-        l_end = start + lhand_aiming_dir * larm_offset
-
-        start = start.cpu().numpy()
-        l_aim = l_aim.cpu().numpy()
-        l_end = l_end.cpu().numpy()
+        # 2. lhand visualization
         l_end = self.ltemp.cpu().numpy()
-
-        # l_end = self.goal_tensor[:, 3:6].cpu().numpy()
-
-        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
-
-        lines = np.stack([
-            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, l_aim[:, 0], l_aim[:, 1], l_aim[:,2]+0.005*i), -1)
-        for i in range(-n_lines//2, n_lines//2)], -2)
-        for i, l in zip(not_near, lines):
-            e = self.envs[i]
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])
 
         for i in range(len(self.envs)):
             lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 1, 0))   # green
