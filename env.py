@@ -1535,14 +1535,14 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         #!
 
         #! ADDED lhand position
-        lhand_aiming_tensor = self.temp2
+        lhand_aiming_tensor = self.temp2[env_ids]
         lhand_aiming_dir = rotatepoint(quatmultiply(q, lhand_aiming_tensor), x_dir)   # GLOBAL lhand_aiming_dir (x-dir)
         l_dist = torch.linalg.norm(lhand_aiming_dir, ord=2, dim=-1, keepdim=True)
         lhand_aiming_dir.div_(l_dist)                                                   # normalize dir                     
 
         l_end = start + lhand_aiming_dir * larm_offset                     #! shape: (n_envs, 3)
 
-        self.ltemp = torch.zeros((n_envs, 3), device=self.device)
+        self.ltemp = torch.zeros((len(self.envs), 3), device=self.device)
         if n_envs == len(self.envs):
             self.ltemp[:, 0] = l_end[:, 0]
             self.ltemp[:, 1] = l_end[:, 1]
