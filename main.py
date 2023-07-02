@@ -498,7 +498,10 @@ if __name__ == "__main__":
         **config.env_params
     )
     if settings.test:
-        env.episode_length = 500000
+        if "view" in (config.env_cls).lower():
+            pass
+        else:
+            env.episode_length = 500000
 
     value_dim = len(env.discriminators)+env.rew_dim
     model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)
@@ -528,6 +531,8 @@ if __name__ == "__main__":
         test(env, model)
     # train 일 때
     else:
+        if "view" in (config.env_cls).lower():
+            raise ValueError("{} can be only run in test time".format(config.env_cls))
         # resume 시키려면 
         if settings.resume:
             if (os.path.isfile(settings.ckpt)):
