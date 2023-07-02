@@ -1591,7 +1591,7 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     return torch.cat((ob, local_x.unsqueeze_(-1), local_y.unsqueeze_(-1), local_z.unsqueeze_(-1), rhand_dist.unsqueeze_(-1)), -1)
 
 
-class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
+class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):  
     RANDOM_INIT = True
     def step(self, actions):
         # goal visualize
