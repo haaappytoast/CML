@@ -1,6 +1,6 @@
 import numpy as np
 
-env_cls = "ICCGANHumanoid"
+env_cls = "ICCGANHumanoidEE_ref"
 env_params = dict(
     episode_length = 300,
     motion_file = "assets/motions/gym/chest_open+walk_in_place.json"
