@@ -377,6 +377,17 @@ class Env(object):
     def reward(self):
         return torch.ones((len(self.envs), 0), dtype=torch.float32, device=self.device)
 
+    def set_char_color(self, col, env_ids):
+        n_links = self.char_link_tensor.size(1) 
+        for env_id in env_ids:
+            env_ptr = self.envs[env_id]
+            handle = self.actors[env_id]
+
+            for j in range(n_links):
+                self.gym.set_rigid_body_color(env_ptr, handle, j, gymapi.MESH_VISUAL,
+                                            gymapi.Vec3(col[0], col[1], col[2]))
+        return
+
 
 from ref_motion import ReferenceMotion
 import numpy as np
@@ -726,7 +737,10 @@ class ICCGANHumanoid(Env):
         p_pos, c_pos = self.link_pos[0, p_idx, :], self.link_pos[0, c_idx, :] # [n_links, 3]
         link_len = torch.linalg.norm((p_pos - c_pos), ord=2, dim=-1, keepdim=True)  # [n_links, 1]
         return link_len 
-
+        # what I added
+    def create_motion_info(self):
+        pass
+        # what I added
 @torch.jit.script
 def observe_iccgan(state_hist: torch.Tensor, seq_len: torch.Tensor):
     # state_hist: L x N x D
@@ -1578,4 +1592,258 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
 
 
 class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
-    pass
+    RANDOM_INIT = True
+    def step(self, actions):
+        # goal visualize
+        self._motion_sync()
+        env_ids = list(range(len(self.envs)))
+        self.reset_goal(env_ids)
+
+        # check overtime of goal_motion_time
+        if self.viewer is not None: 
+            over_env_ids, in_env_ids = self.goal_motion_overtime_check()
+            self.set_char_color([0.85, 0.2, 0.54], over_env_ids)
+
+        obs, rews, dones, info = super().step(actions)
+        return obs, rews, dones, info
+    
+    def goal_motion_overtime_check(self):
+        # get motion length from goal_motion_ids
+        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
+            if "upper" in discs[0].name or "full" in discs[0].name:
+                motion_length = ref_motion.motion_length
+        # goal_motion_times
+        over_env_ids = torch.nonzero(self.goal_motion_times > motion_length[0])
+        in_env_ids = torch.nonzero(self.goal_motion_times <= motion_length[0])
+        return over_env_ids, in_env_ids
+
+    def create_motion_info(self):
+        self.motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
+        self.motion_times = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+
+        self.goal_motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
+        self.goal_motion_times = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+
+        self.goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device)
+        self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
+        self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
+
+    def create_tensors(self):
+        super().create_tensors()
+        self.create_motion_info()
+        n_links = self.gym.get_actor_rigid_body_count(self.envs[0], 0)
+        n_dofs = self.gym.get_actor_dof_count(self.envs[0], 0)
+        #reference link tensors and joint tensors
+        if self.goal_link_tensor.size(1) > n_links:  
+            self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[:, :n_links, :3], self.goal_link_tensor[:, :n_links, 3:7]
+            self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[:, :n_links, 7:10], self.goal_link_tensor[:, :n_links, 10:13]
+            self.goal_char_link_tensor = self.goal_link_tensor[:, :n_links]
+        else:
+            self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[..., :3], self.goal_link_tensor[..., 3:7]
+            self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[..., 7:10], self.goal_link_tensor[..., 10:13]
+            self.goal_char_goal_link_tensor = self.goal_link_tensor
+        if self.goal_joint_tensor.size(1) > n_dofs:
+            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[:, :n_dofs, 0], self.goal_joint_tensor[:, :n_dofs, 1]
+            self.goal_char_joint_tensor = self.goal_joint_tensor[:, :n_dofs]
+        else:
+            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
+            self.goal_char_joint_tensor = self.goal_joint_tensor
+
+    def init_state(self, env_ids):
+        motion_ids, motion_times = self.ref_motion.sample(len(env_ids))
+        self.motion_ids[env_ids] = torch.tensor(motion_ids, dtype=torch.int32, device=self.device)
+        self.motion_times[env_ids] = torch.tensor(motion_times, dtype=torch.float32, device=self.device)
+
+        # initialize goal_motion
+        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
+            if "upper" in discs[0].name or "full" in discs[0].name:
+                goal_motion_ids, goal_motion_times = ref_motion.sample(len(env_ids))
+            else: pass
+
+        self.goal_motion_ids[env_ids] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
+        self.goal_motion_times[env_ids] = torch.tensor(goal_motion_times, dtype=torch.float32, device=self.device)
+
+        # print("\n---------------INIT STATE: {}---------------\n".format(env_ids))
+        
+        if self.viewer is not None: 
+            self.set_char_color([1, 1, 1], env_ids)
+
+        return self.ref_motion.state(motion_ids, motion_times)
+
+    def _observe(self, env_ids):
+        if env_ids is None:
+            return observe_iccgan_ee(
+                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
+                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+        else:
+            return observe_iccgan_ee(
+                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
+                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+        
+    def update_viewer(self):
+        super().update_viewer()
+        # self.gym.clear_lines(self.viewer)
+        # self.visualize_ee_positions()
+        # self.visualize_origin()
+
+    def _motion_sync(self):
+        n_inst = len(self.envs)
+        env_ids = list(range(n_inst))
+        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
+            if "upper" in discs[0].name or "full" in discs[0].name:
+                # print("ref_motion, replay_speed, ob_horizon, discs: ", ref_motion, replay_speed, ob_horizon, discs)
+                dt = self.step_time
+                if replay_speed is not None:
+                    dt /= replay_speed(n_inst)
+                # 처음 시작 
+                motion_ids, motion_times0 = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
+                not_init_env_ids = torch.nonzero(self.lifetime).view(-1)
+                init_env_ids = (self.lifetime == 0).nonzero().view(-1)
+
+                if replay_speed is not None:
+                    dt = torch.tensor(dt, dtype=torch.float32, device=self.device)                  # list -> tensor
+                else:
+                    dt = torch.tensor(dt, dtype=torch.float32, device=self.device).repeat(n_inst)   # float -> tensor
+                
+                if self.RANDOM_INIT:
+                    # initialize 된 게 아니라면
+                    # init 안된 친구는 dt를 계속 더해줌
+                    if(len(not_init_env_ids)):
+                        # self.goal_motion_times[not_init_env_ids] = self.goal_motion_times[not_init_env_ids] + torch.tensor(dt[not_init_env_ids.cpu()], dtype=torch.float32, device=self.device)
+                        self.goal_motion_times[not_init_env_ids] = self.goal_motion_times[not_init_env_ids] + dt[not_init_env_ids.cpu()]
+                    # init 된 친구는 0
+                    if(len(init_env_ids)):
+                        self.goal_motion_times[init_env_ids] = self.goal_motion_times[init_env_ids] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+                else:
+                    # init 안된 친구는 dt를 계속 더해줌
+                    if(len(not_init_env_ids)):
+                        self.goal_motion_times[not_init_env_ids] += dt[not_init_env_ids.cpu()]
+                    # init 된 친구는 0
+                    if(len(init_env_ids)):
+                        self.goal_motion_times[init_env_ids] = torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+
+                # humnaoid 시간 따로
+                self.motion_times = self.motion_times + dt
+                motion_times0 = self.goal_motion_times.cpu().numpy()
+                root_tensor, link_tensor, joint_tensor = ref_motion.state(motion_ids, motion_times0)
+        
+        self.goal_root_tensor[env_ids] = root_tensor
+        self.goal_link_tensor[env_ids] = link_tensor
+        self.goal_joint_tensor[env_ids] = joint_tensor
+
+        ee_links = [5, 8]  # right hand, left hand
+        ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+
+    def reset_envs(self, env_ids):
+        ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
+
+        self.root_tensor[env_ids] = ref_root_tensor
+        self.link_tensor[env_ids] = ref_link_tensor
+        self.joint_tensor[env_ids] = ref_joint_tensor
+
+        actor_ids = self.actor_ids[env_ids].flatten()
+        n_actor_ids = len(actor_ids)
+        actor_ids = gymtorch.unwrap_tensor(actor_ids)
+        self.gym.set_actor_root_state_tensor_indexed(self.sim,
+            gymtorch.unwrap_tensor(self.root_tensor),
+            actor_ids, n_actor_ids
+        )
+        actor_ids = self.actor_ids_having_dofs[env_ids].flatten()
+        n_actor_ids = len(actor_ids)
+        actor_ids = gymtorch.unwrap_tensor(actor_ids)
+        self.gym.set_dof_state_tensor_indexed(self.sim,
+            gymtorch.unwrap_tensor(self.joint_tensor),
+            actor_ids, n_actor_ids
+        )
+
+        self.lifetime[env_ids] = 0
+        #! b/c reset goal in every steps!
+        # self.reset_goal(env_ids)
+            
+    def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
+        #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+        
+        # reset하는 env 개수
+        n_envs = len(env_ids)
+        ee_links = [5, 8]  # right hand, left hand
+        ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+
+        all_envs = n_envs == len(self.envs)
+
+        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
+        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
+            vel = self.goal_sp_min
+        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
+            vel = self.goal_sp_mean
+        else:
+            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
+        
+        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
+
+        if all_envs:
+            self.init_dist = dist
+            goal_timer.copy_(timer)
+        else:
+            self.init_dist[env_ids] = dist
+            goal_timer[env_ids] = timer
+        
+        #! what I added for ee position (right hand)
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0] = ee_pos[:, 0, 0]
+            goal_tensor[:, 1] = ee_pos[:, 0, 1]
+            goal_tensor[:, 2] = ee_pos[:, 0, 2]
+        else:
+            goal_tensor[env_ids, 0] = ee_pos[:, 0, 0]
+            goal_tensor[env_ids, 1] = ee_pos[:, 0, 1]
+            goal_tensor[env_ids, 2] = ee_pos[:, 0, 2]
+        #!
+
+        #! ADDED lhand position
+        self.ltemp = torch.zeros((len(self.envs), 3), device=self.device)
+        if n_envs == len(self.envs):
+            self.ltemp[:, 0] = ee_pos[:, 1, 0]
+            self.ltemp[:, 1] = ee_pos[:, 1, 1]
+            self.ltemp[:, 2] = ee_pos[:, 1, 2]
+        else:
+            self.ltemp[env_ids, 0] = ee_pos[:, 1, 0]
+            self.ltemp[env_ids, 1] = ee_pos[:, 1, 1]
+            self.ltemp[env_ids, 2] = ee_pos[:, 1, 2]
+        #!
+
+    def visualize_origin(self):
+        pose = gymapi.Transform()
+        pose.p = gymapi.Vec3(0.0, 1.0, 0.0)
+        pose.r = gymapi.Quat(0, 0.0, 0.0, 1)
+        for i in range(len(self.envs)):
+            axes_geom = gymutil.AxesGeometry(1)
+            sphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 0, 0))   # pink
+
+            gymutil.draw_lines(axes_geom, self.gym, self.viewer, self.envs[i], pose)
+            gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], pose)   
+
+        pass
+
+    def visualize_ee_positions(self):
+        ee_links = [2, 5, 8, 0]
+        hsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 1))     # white
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))   # pink
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))   # yellow
+        rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))   # pink
+        ee_pos = self.goal_link_pos[:, ee_links, :]
+        for i in range(len(self.envs)):
+            head_pos = ee_pos[i, 0]
+            rhand_pos = ee_pos[i, 1]
+            lhand_pos = ee_pos[i, 2]
+            root_pos = ee_pos[i, 3]
+            head_pose = gymapi.Transform(gymapi.Vec3(head_pos[0], head_pos[1], head_pos[2]), r=None)
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
+            root_pose = gymapi.Transform(gymapi.Vec3(root_pos[0], root_pos[1], root_pos[2]), r=None)
+            gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)    # white 
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   # pink
+            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
+            gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)   
