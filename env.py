@@ -7,6 +7,7 @@ import utils
 from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized
 from isaacgym import gymutil
 from humanoid_view import HumanoidView
+from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
     return kwargs[key] if key in kwargs else default_val

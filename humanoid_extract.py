@@ -8,6 +8,8 @@ from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, 
 from isaacgym import gymutil
 
 from ref_motion import ReferenceMotion
+from poselib.skeleton.skeleton3d import SkeletonTree, SkeletonState, SkeletonMotion
+from collections import OrderedDict
 import numpy as np
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
@@ -845,7 +847,7 @@ def observe_disc(state_hist: torch.Tensor, seq_len: torch.Tensor, key_links: Opt
     
     return ob2
 
-class HumanoidView(ICCGANHumanoid):
+class HumanoidExtract(ICCGANHumanoid):
     
     RANDOM_INIT = False
     def create_motion_info(self):
@@ -914,8 +916,8 @@ class HumanoidView(ICCGANHumanoid):
         self.link_tensor[env_ids] = self._ref_link_tensor
         self.joint_tensor[env_ids] = self._ref_joint_tensor
 
-        # if self.link_tensor.size(1) > n_links:  
-        #     self.link_pos, self.link_orient = self.link_tensor[:, :n_links, :3], self.link_tensor[:, :n_links, 3:7]
+
+        print("\n\nself.link_tensor: ", self.link_tensor)
 
         actor_ids = self.actor_ids[env_ids].flatten()
         n_actor_ids = len(actor_ids)
@@ -951,3 +953,311 @@ class HumanoidView(ICCGANHumanoid):
             gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)   
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)
+
+class ICCGANHumanoidExtractTarget(ICCGANHumanoid):
+
+    GOAL_REWARD_WEIGHT = 0.5
+    GOAL_DIM = 4                    # (x, y, sp, dist)
+    GOAL_TENSOR_DIM = 3             # global position of root target (X, Y, Z) - where root should reach
+    ENABLE_GOAL_TIMER = True
+
+    GOAL_RADIUS = 0.5
+    SP_LOWER_BOUND = 1.2
+    SP_UPPER_BOUND = 1.5
+    GOAL_TIMER_RANGE = 90, 150
+    GOAL_SP_MEAN = 1
+    GOAL_SP_STD = 0.25
+    GOAL_SP_MIN = 0
+    GOAL_SP_MAX = 1.25
+
+    SHARP_TURN_RATE = 1
+
+    RANDOM_INIT = True
+    MOTION_TIMER_RANGE = 0, 50
+
+    def __init__(self, *args, **kwargs):
+        self.goal_radius = parse_kwarg(kwargs, "goal_radius", self.GOAL_RADIUS)
+        self.sharp_turn_rate = parse_kwarg(kwargs, "sharp_turn_rate", self.SHARP_TURN_RATE)
+        self.sp_lower_bound = parse_kwarg(kwargs, "sp_lower_bound", self.SP_LOWER_BOUND)
+        self.sp_upper_bound = parse_kwarg(kwargs, "sp_upper_bound", self.SP_UPPER_BOUND)
+        self.goal_timer_range = parse_kwarg(kwargs, "goal_timer_range", self.GOAL_TIMER_RANGE)
+        self.goal_sp_mean = parse_kwarg(kwargs, "goal_sp_mean", self.GOAL_SP_MEAN)
+        self.goal_sp_std = parse_kwarg(kwargs, "goal_sp_std", self.GOAL_SP_STD)
+        self.goal_sp_min = parse_kwarg(kwargs, "goal_sp_min", self.GOAL_SP_MIN)
+        self.goal_sp_max = parse_kwarg(kwargs, "goal_sp_max", self.GOAL_SP_MAX)
+
+        self.motion_timer_range = parse_kwarg(kwargs, "motion_timer_range", self.MOTION_TIMER_RANGE)
+
+        super().__init__(*args, **kwargs)
+
+        self.create_motion_info()
+        self.create_motion_npy()
+    def create_motion_info(self):
+        self.motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
+        self.motion_times = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+
+        self.goal_motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
+        self.goal_motion_times = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+
+        self.goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device)
+        self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
+        self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
+        
+        n_links = self.gym.get_actor_rigid_body_count(self.envs[0], 0)
+        n_dofs = self.gym.get_actor_dof_count(self.envs[0], 0)
+        #reference link tensors and joint tensors
+        if self.goal_link_tensor.size(1) > n_links:  
+            self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[:, :n_links, :3], self.goal_link_tensor[:, :n_links, 3:7]
+            self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[:, :n_links, 7:10], self.goal_link_tensor[:, :n_links, 10:13]
+            self.goal_char_link_tensor = self.goal_link_tensor[:, :n_links]
+        else:
+            self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[..., :3], self.goal_link_tensor[..., 3:7]
+            self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[..., 7:10], self.goal_link_tensor[..., 10:13]
+            self.goal_char_goal_link_tensor = self.goal_link_tensor
+        if self.goal_joint_tensor.size(1) > n_dofs:
+            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[:, :n_dofs, 0], self.goal_joint_tensor[:, :n_dofs, 1]
+            self.goal_char_joint_tensor = self.goal_joint_tensor[:, :n_dofs]
+        else:
+            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
+            self.goal_char_joint_tensor = self.goal_joint_tensor
+
+    def create_motion_npy(self):
+        # get skeleton_tree, is_local, __name__
+        self.ref_motion.character_model 
+        skeleton = SkeletonTree.from_mjcf(self.character_model).to_dict()
+        fps = self.fps
+        is_local = False
+
+        self.motion_npy = OrderedDict()
+        self.motion_npy['rotation'] = {'arr':None, 'context':{'dtype': 'float64'}}
+        self.motion_npy['root_translation'] = {'arr':None, 'context':{'dtype': 'float64'}}
+        self.motion_npy['global_velocity'] = {'arr':None, 'context':{'dtype': 'float64'}}
+        self.motion_npy['global_angular_velocity'] = {'arr':None, 'context':{'dtype': 'float64'}}
+        self.motion_npy['skeleton_tree'] = skeleton
+        self.motion_npy['is_local'] = is_local
+        self.motion_npy['fps'] = fps
+        self.motion_npy['__name__'] = 'SkeletonMotion'
+        
+        time = self.motion_timer_range[1]-self.motion_timer_range[0]
+        
+        self.rotation = torch.zeros((time, self.link_tensor.size(1), 4), dtype=torch.float64, device=self.device)                # (58, 15, 4)
+        self.root_translation = torch.zeros((time, 3), dtype=torch.float64, device=self.device)                                       # (58, 3)
+        self.global_velocity = torch.zeros((time, self.link_tensor.size(1), 3), dtype=torch.float64, device=self.device)         # (58, 15, 3)
+        self.global_angular_velocity = torch.zeros((time, self.link_tensor.size(1), 3), dtype=torch.float64, device=self.device) # (58, 15, 3)
+
+    def update_viewer(self):
+        super().update_viewer()
+        self.gym.clear_lines(self.viewer)
+        n_lines = 10
+        tar_x = self.goal_tensor[:, 0].cpu().numpy()
+
+        p = self.root_pos.cpu().numpy()
+        zero = np.zeros_like(tar_x)+0.05
+        tar_y = self.goal_tensor[:, 1].cpu().numpy()
+        lines = np.stack([
+            np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
+        for i in range(n_lines)], -2)
+        for e, l in zip(self.envs, lines):
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
+        n_lines = 10
+        target_pos = self.goal_tensor.cpu().numpy()
+        lines = np.stack([
+            np.stack((
+                target_pos[:, 0], target_pos[:, 1], zero,
+                target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
+                target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
+                zero
+            ), -1)
+        for i in range(n_lines)], -2)
+        for e, l in zip(self.envs, lines):
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
+        
+        self.visualize_ee_positions()
+
+    def _observe(self, env_ids):
+        if env_ids is None:
+            return observe_iccgan_target(
+                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
+                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+        else:
+            return observe_iccgan_target(
+                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
+                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
+            )
+
+    def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
+        #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+        
+        n_envs = len(env_ids)
+        all_envs = n_envs == len(self.envs)
+        root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
+
+        small_turn = torch.rand(n_envs, device=self.device) > self.sharp_turn_rate
+        large_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(2*np.pi)
+        small_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).sub_(0.5).mul_(2*(np.pi/3))
+
+        heading = heading_zup(root_orient)
+        small_angle += heading
+        theta = torch.where(small_turn, small_angle, large_angle)
+
+        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
+        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
+            vel = self.goal_sp_min
+        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
+            vel = self.goal_sp_mean
+        else:
+            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
+        
+        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
+        dx = dist*torch.cos(theta)
+        dy = dist*torch.sin(theta)
+
+        if all_envs:
+            self.init_dist = dist
+            goal_timer.copy_(timer)
+            goal_tensor[:,0] = self.root_pos[:,0] + dx
+            goal_tensor[:,1] = self.root_pos[:,1] + dy
+        else:
+            self.init_dist[env_ids] = dist
+            goal_timer[env_ids] = timer
+            goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
+            goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
+        
+    def reward(self, goal_tensor=None, goal_timer=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+
+        p = self.root_pos                                       # 현재 root_pos
+        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
+
+        dp_ = goal_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
+        dp_[:, self.UP_AXIS] = 0
+        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
+        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
+
+        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
+        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
+        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
+
+        dp = p - p_                                            # (현재 root - 이전 root)
+        dp[:, self.UP_AXIS] = 0
+        v = dp / self.step_time                                # current velocity: dp / duration 
+        r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
+
+        dp = goal_tensor - p
+        dp[:, self.UP_AXIS] = 0
+        dist = torch.linalg.norm(dp, ord=2, dim=-1)
+        self.near = dist < self.goal_radius
+
+        r[self.near] = 1
+        
+        if self.viewer is not None:
+            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
+        
+        return r.unsqueeze_(-1)
+
+    def termination_check(self, goal_tensor=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        fall = super().termination_check()
+        dp = goal_tensor - self.root_pos
+        dp[:, self.UP_AXIS] = 0
+        dist = dp.square_().sum(-1).sqrt_()
+        too_far = dist-self.init_dist > 3
+        return torch.logical_or(fall, too_far)
+
+    def step(self, actions):
+        # fill in the otation root_translation, etc for motion_npy
+        self._motion_sync()
+
+
+        if self.lifetime[0] == self.motion_timer_range[1]:
+            # save the npy_file
+            self.motion_npy['rotation']['arr'] = self.rotation.cpu().numpy() 
+            self.motion_npy['root_translation']['arr'] = self.root_translation.cpu().numpy() 
+            self.motion_npy['global_velocity']['arr'] = self.global_velocity.cpu().numpy() 
+            self.motion_npy['global_angular_velocity']['arr'] = self.global_angular_velocity.cpu().numpy() 
+            print("saving self.motion_npy: ", self.motion_npy)
+            npy_motion = SkeletonMotion.from_dict(
+                dict_repr=self.motion_npy
+            )
+            # save motion in npy format
+            npy_motion.to_file("synth_data/jj_locomotion2.npy")
+
+        obs, rews, dones, info = super().step(actions)
+
+        return obs, rews, dones, info
+
+    def _motion_sync(self):
+        n_inst = len(self.envs)
+        env_ids = list(range(n_inst))
+
+        self.goal_root_tensor[env_ids] = self.root_tensor
+        self.goal_link_tensor[env_ids] = self.link_tensor
+        self.goal_joint_tensor[env_ids] = self.joint_tensor
+
+        #motion_timer = torch.randint(self.motion_timer_range[0], self.motion_timer_range[1], (n_inst,), dtype=self.motion_timer.dtype, device=self.device)
+
+        if self.lifetime[0] < self.motion_timer_range[1] and self.lifetime[0] >= self.motion_timer_range[0]:
+            # get rotation, root_translation, global_velocity, global_angular_velocity 
+            print("self.lifetime: ", self.lifetime[0])
+            self.rotation[self.lifetime[0]- self.motion_timer_range[0]] = self.link_tensor[:, :, 3:7] 
+            self.root_translation[self.lifetime[0]- self.motion_timer_range[0]] = self.root_tensor[:, 0, :3]
+            self.global_velocity[self.lifetime[0]- self.motion_timer_range[0]] = self.root_tensor[:, 0, 7:10]
+            self.global_angular_velocity[self.lifetime[0]- self.motion_timer_range[0]] = self.root_tensor[:, 0, 10:13]
+        
+        ee_links = [5, 8]  # right hand, left hand
+        ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+
+    def visualize_ee_positions(self):
+        ee_links = [2, 5, 8, 0]
+        hsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 1))     # white
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))   # pink
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))   # yellow
+        rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))   # pink
+        ee_pos = self.goal_link_pos[:, ee_links, :]
+        for i in range(len(self.envs)):
+            head_pos = ee_pos[i, 0]
+            rhand_pos = ee_pos[i, 1]
+            lhand_pos = ee_pos[i, 2]
+            root_pos = ee_pos[i, 3]
+            head_pose = gymapi.Transform(gymapi.Vec3(head_pos[0], head_pos[1], head_pos[2]), r=None)
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
+            root_pose = gymapi.Transform(gymapi.Vec3(root_pos[0], root_pos[1], root_pos[2]), r=None)
+            gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)    # white 
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   # pink
+            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
+            gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)   
+
+@torch.jit.script
+def observe_iccgan_target(state_hist: torch.Tensor, seq_len: torch.Tensor,
+    target_tensor: torch.Tensor, timer: torch.Tensor,
+    sp_upper_bound: float, fps: int
+):
+    ob = observe_iccgan(state_hist, seq_len)
+
+    root_pos = state_hist[-1, :, :3]
+    root_orient = state_hist[-1, :, 3:7]
+
+    dp = target_tensor - root_pos
+    x = dp[:, 0]
+    y = dp[:, 1]
+    heading_inv = -heading_zup(root_orient)
+    c = torch.cos(heading_inv)      # root_orientation의 x-dir의 각도 (inverse) 
+    s = torch.sin(heading_inv)
+    x, y = c*x-s*y, s*x+c*y         # [[c -s], [s c]] * [x y]^T (local_dp -> root_orient에서 바라본 dp)
+
+    dist = (x*x + y*y).sqrt_()
+    sp = dist.mul(fps/timer)        # speed! ... dist/timer->how many dist we should go per step ... dist*fps/timer -> how much distance we should go in 1 sec
+
+    too_close = dist < 1e-5
+    x = torch.where(too_close, x, x/dist)   # x/dist: normalized x
+    y = torch.where(too_close, y, y/dist)
+    sp.clip_(max=sp_upper_bound)
+    dist.div_(3).clip_(max=1.5)
+
+    return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+
