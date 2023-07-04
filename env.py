@@ -1787,7 +1787,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
 
         #! ee_pos from init_root
-        root_offset = self.init_root_offset
+        root_offset = self.init_root_offset[env_ids].unsqueeze(1).repeat(1, len(ee_links), 1)
         ee_pos = ee_pos + root_offset
 
         all_envs = n_envs == len(self.envs)
@@ -1852,8 +1852,8 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))   # yellow
         rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))   # pink
         ee_pos = self.goal_link_pos[:, ee_links, :]
-        # root_offset = self.init_root_offset
-        # ee_pos = ee_pos + root_offset        
+        root_offset = self.init_root_offset.unsqueeze(1).repeat(1, len(ee_links), 1)
+        ee_pos = ee_pos + root_offset        
         for i in range(len(self.envs)):
             head_pos = ee_pos[i, 0]
             rhand_pos = ee_pos[i, 1]
