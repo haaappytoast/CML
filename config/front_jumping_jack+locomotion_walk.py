@@ -1,6 +1,6 @@
 import numpy as np
 
-env_cls = "ICCGANHumanoidEE"
+env_cls = "ICCGANHumanoidEE_ref"
 env_params = dict(
     episode_length = 500,
     motion_file = "assets/motions/clips_walk.yaml",
@@ -9,7 +9,7 @@ env_params = dict(
     goal_radius = 0.5,
     sp_lower_bound = 1.2,
     sp_upper_bound = 1.5,
-    goal_timer_range = (90, 150),
+    goal_timer_range = (500, 550),
     goal_sp_mean = 1,
     goal_sp_std = 0.25,
     goal_sp_min = 0,
@@ -24,7 +24,7 @@ training_params = dict(
 
 discriminators = {
     "front_jumping_jack/upper": dict(
-        motion_file = "assets/motions/gym/front_jumping_jack.json",
+        motion_file = "synth_data/jj_locomotion2.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         local_pos = True,
