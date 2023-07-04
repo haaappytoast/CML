@@ -1629,6 +1629,11 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
         self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
 
+        self.init_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device)
+        self.init_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
+        self.init_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
+        self.init_root_offset = torch.zeros_like(self.root_pos, dtype=torch.float32, device=self.device)
+
     def create_tensors(self):
         super().create_tensors()
         self.create_motion_info()
@@ -1649,6 +1654,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         else:
             self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
             self.goal_char_joint_tensor = self.goal_joint_tensor
+
 
     def init_state(self, env_ids):
         motion_ids, motion_times = self.ref_motion.sample(len(env_ids))
@@ -1717,6 +1723,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
                     # init 된 친구는 0
                     if(len(init_env_ids)):
                         self.goal_motion_times[init_env_ids] = self.goal_motion_times[init_env_ids] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+
                 else:
                     # init 안된 친구는 dt를 계속 더해줌
                     if(len(not_init_env_ids)):
@@ -1733,9 +1740,10 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
-
-        ee_links = [5, 8]  # right hand, left hand
-        ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+        
+        # if env is initialized, save root_offset
+        if(len(init_env_ids)):
+            self.init_root_offset[init_env_ids] = self.init_root_tensor[init_env_ids, 0, :3] - self.goal_root_tensor[init_env_ids, 0, :3]
 
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
@@ -1743,6 +1751,11 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         self.root_tensor[env_ids] = ref_root_tensor
         self.link_tensor[env_ids] = ref_link_tensor
         self.joint_tensor[env_ids] = ref_joint_tensor
+
+        #! save initial ref_motion for offset
+        self.init_root_tensor[env_ids] = ref_root_tensor 
+        # self.init_link_tensor[env_ids] = ref_link_tensor 
+        # self.init_joint_tensor[env_ids] = ref_joint_tensor         
 
         actor_ids = self.actor_ids[env_ids].flatten()
         n_actor_ids = len(actor_ids)
@@ -1772,6 +1785,10 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         n_envs = len(env_ids)
         ee_links = [5, 8]  # right hand, left hand
         ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+
+        #! ee_pos from init_root
+        root_offset = self.init_root_offset
+        ee_pos = ee_pos + root_offset
 
         all_envs = n_envs == len(self.envs)
 
@@ -1835,6 +1852,8 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))   # yellow
         rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))   # pink
         ee_pos = self.goal_link_pos[:, ee_links, :]
+        # root_offset = self.init_root_offset
+        # ee_pos = ee_pos + root_offset        
         for i in range(len(self.envs)):
             head_pos = ee_pos[i, 0]
             rhand_pos = ee_pos[i, 1]
