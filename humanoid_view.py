@@ -883,8 +883,8 @@ class HumanoidView(ICCGANHumanoid):
     def init_state(self, env_ids):
         motion_ids, motion_times = self.ref_motion.sample(len(env_ids))
 
-        self.motion_ids[env_ids] = torch.Tensor(motion_ids)
-        self.motion_times[env_ids] = torch.Tensor(motion_times)
+        self.motion_ids[env_ids] = torch.tensor(motion_ids, dtype=torch.float32, device=self.device)
+        self.motion_times[env_ids] = torch.tensor(motion_times, dtype=torch.float32, device=self.device)
         if self.RANDOM_INIT:
             print("random_init time: ", motion_times)
         return self.ref_motion.state(motion_ids, motion_times)
