@@ -1625,7 +1625,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         self.goal_motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
         self.goal_motion_times = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
 
-        self.goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device)
+        self.goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device) # [n_envs, 1, 13]
         self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
         self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
 
@@ -1640,7 +1640,9 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         n_links = self.gym.get_actor_rigid_body_count(self.envs[0], 0)
         n_dofs = self.gym.get_actor_dof_count(self.envs[0], 0)
         #reference link tensors and joint tensors
-        if self.goal_link_tensor.size(1) > n_links:  
+        self.goal_root_pos, self.goal_root_orient = self.goal_root_tensor[:, 0, :3], self.goal_root_tensor[:, 0, 3:7]
+        print("create tensors self.goal_root_orient.shape: ", self.goal_root_orient.shape)
+        if self.goal_link_tensor.size(1) > n_links:
             self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[:, :n_links, :3], self.goal_link_tensor[:, :n_links, 3:7]
             self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[:, :n_links, 7:10], self.goal_link_tensor[:, :n_links, 10:13]
             self.goal_char_link_tensor = self.goal_link_tensor[:, :n_links]
