@@ -1807,29 +1807,101 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
             self.init_dist[env_ids] = dist
             goal_timer[env_ids] = timer
         
+        # ego-centric (ee_pos - origin)
+        UP_AXIS = 2
+        root_pos, root_orient = self.goal_root_pos[env_ids], self.goal_root_orient[env_ids]       # [n_envs, 3], [n_envs, 4]
+        origin = root_pos.clone()
+        origin[..., UP_AXIS] = 0
+        heading = heading_zup(root_orient)                                      # N
+        up_dir = torch.zeros_like(origin)                                       # N x 1 x 3
+        up_dir[..., UP_AXIS] = 1
+        heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
+        heading_orient_inv = heading_orient_inv.unsqueeze(-2).repeat(1, len(ee_links),1)
+        # ego_ee_pos[:, 0], [:, 1]: "vector" of rhand, lhand from origin 
+        ego_ee_pos = ee_pos - origin.unsqueeze(-2)                             # [n_envs, n_ee_link, 3]
+        # change x,y,z into root orient
+        ego_ee_pos = rotatepoint(heading_orient_inv, ego_ee_pos)       # [512, n_ee_link, 3]                                      # N x 3
         #! what I added for ee position (right hand)
         if n_envs == len(self.envs):
-            goal_tensor[:, 0] = ee_pos[:, 0, 0]
-            goal_tensor[:, 1] = ee_pos[:, 0, 1]
-            goal_tensor[:, 2] = ee_pos[:, 0, 2]
+            goal_tensor[:, 0] = ego_ee_pos[:, 0, 0]
+            goal_tensor[:, 1] = ego_ee_pos[:, 0, 1]
+            goal_tensor[:, 2] = ego_ee_pos[:, 0, 2]
         else:
-            goal_tensor[env_ids, 0] = ee_pos[:, 0, 0]
-            goal_tensor[env_ids, 1] = ee_pos[:, 0, 1]
-            goal_tensor[env_ids, 2] = ee_pos[:, 0, 2]
+            goal_tensor[env_ids, 0] = ego_ee_pos[:, 0, 0]
+            goal_tensor[env_ids, 1] = ego_ee_pos[:, 0, 1]
+            goal_tensor[env_ids, 2] = ego_ee_pos[:, 0, 2]
         #!
 
         #! ADDED lhand position
         self.ltemp = torch.zeros((len(self.envs), 3), device=self.device)
         if n_envs == len(self.envs):
-            self.ltemp[:, 0] = ee_pos[:, 1, 0]
-            self.ltemp[:, 1] = ee_pos[:, 1, 1]
-            self.ltemp[:, 2] = ee_pos[:, 1, 2]
+            self.ltemp[:, 0] = ego_ee_pos[:, 1, 0]
+            self.ltemp[:, 1] = ego_ee_pos[:, 1, 1]
+            self.ltemp[:, 2] = ego_ee_pos[:, 1, 2]
         else:
-            self.ltemp[env_ids, 0] = ee_pos[:, 1, 0]
-            self.ltemp[env_ids, 1] = ee_pos[:, 1, 1]
-            self.ltemp[env_ids, 2] = ee_pos[:, 1, 2]
+            self.ltemp[env_ids, 0] = ego_ee_pos[:, 1, 0]
+            self.ltemp[env_ids, 1] = ego_ee_pos[:, 1, 1]
+            self.ltemp[env_ids, 2] = ego_ee_pos[:, 1, 2]
         #!
 
+    def reward(self, goal_tensor=None, goal_timer=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+
+        p = self.root_pos                                       # 현재 root_pos
+        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
+
+        dp_ = goal_tensor[..., :3] - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
+        dp_[:, self.UP_AXIS] = 0
+        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
+        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
+
+        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
+        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
+        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
+
+        dp = p - p_                                            # (현재 root - 이전 root)
+        dp[:, self.UP_AXIS] = 0
+        v = dp / self.step_time                                # current velocity: dp / duration 
+        r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
+
+        dp = goal_tensor[..., :3] - p
+        dp[:, self.UP_AXIS] = 0
+        dist = torch.linalg.norm(dp, ord=2, dim=-1)
+        self.near = dist < self.goal_radius
+
+        r[self.near] = 1
+        
+        if self.viewer is not None:
+            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
+        
+        #! I added
+        target_ego_rhand_pos = goal_tensor[..., :3]
+
+        # ego-centric (ee_pos - origin)
+        UP_AXIS = 2
+        root_pos, root_orient = self.root_pos, self.root_orient                 # [n_envs, 3], [n_envs, 4]
+        origin = root_pos.clone()
+        origin[..., UP_AXIS] = 0
+        heading = heading_zup(root_orient)                                      # N
+        up_dir = torch.zeros_like(origin)                                       # N x 1 x 3
+        up_dir[..., UP_AXIS] = 1
+        heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
+        
+        rhand_pos = self.link_pos[:, self.r_aiming_end_link]
+        ego_rhand_pos = rhand_pos - origin
+        ego_rhand_pos = rotatepoint(heading_orient_inv, ego_rhand_pos)          # N x 3
+        rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
+        rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
+        rarm_len = rarm_len.repeat(len(self.envs))
+        
+        #! 이건 near 생각해보기!
+        e = torch.linalg.norm(target_ego_rhand_pos.sub(ego_rhand_pos), ord=2, dim=-1).div_(rarm_len)
+        rhand_rew = e.mul_(-2).exp_()
+
+        #! I added
+        return rhand_rew.unsqueeze_(-1)
+    
     def visualize_origin(self):
         pose = gymapi.Transform()
         pose.p = gymapi.Vec3(0.0, 1.0, 0.0)
