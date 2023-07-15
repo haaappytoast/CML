@@ -1634,6 +1634,9 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         self.init_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
         self.init_root_offset = torch.zeros_like(self.root_pos, dtype=torch.float32, device=self.device)
 
+        self.offset_time = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+        self.etime = torch.zeros(len(self.envs), dtype=torch.float32, device=self.device)
+
     def create_tensors(self):
         super().create_tensors()
         self.create_motion_info()
@@ -1641,7 +1644,6 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         n_dofs = self.gym.get_actor_dof_count(self.envs[0], 0)
         #reference link tensors and joint tensors
         self.goal_root_pos, self.goal_root_orient = self.goal_root_tensor[:, 0, :3], self.goal_root_tensor[:, 0, 3:7]
-        print("create tensors self.goal_root_orient.shape: ", self.goal_root_orient.shape)
         if self.goal_link_tensor.size(1) > n_links:
             self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[:, :n_links, :3], self.goal_link_tensor[:, :n_links, 3:7]
             self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[:, :n_links, 7:10], self.goal_link_tensor[:, :n_links, 10:13]
@@ -1659,6 +1661,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
 
 
     def init_state(self, env_ids):
+        # print("\ninit_state")
         motion_ids, motion_times = self.ref_motion.sample(len(env_ids))
         self.motion_ids[env_ids] = torch.tensor(motion_ids, dtype=torch.int32, device=self.device)
         self.motion_times[env_ids] = torch.tensor(motion_times, dtype=torch.float32, device=self.device)
@@ -1666,11 +1669,18 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         # initialize goal_motion
         for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
-                goal_motion_ids, goal_motion_times = ref_motion.sample(len(env_ids))
+
+                goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
+                
+                goal_offset_time = ref_motion.randomize_offset(len(env_ids))               # randomize_offset to init_env
+                # goal_motion_ids, goal_motion_times = ref_motion.sample(len(env_ids))
             else: pass
 
         self.goal_motion_ids[env_ids] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
-        self.goal_motion_times[env_ids] = torch.tensor(goal_motion_times, dtype=torch.float32, device=self.device)
+        # self.goal_motion_times[env_ids] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
+        
+        self.etime[env_ids] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
+        self.offset_time[env_ids] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
 
         # print("\n---------------INIT STATE: {}---------------\n".format(env_ids))
         
@@ -1697,6 +1707,13 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
         # self.visualize_ee_positions()
         # self.visualize_origin()
 
+    def getIntersection_Method1(self, a, b):
+        a = a.detach().cpu().numpy()
+        b = b.detach().cpu().numpy()
+        
+        intersection = np.intersect1d(a, b)
+        return torch.from_numpy(intersection)
+    
     def _motion_sync(self):
         n_inst = len(self.envs)
         env_ids = list(range(n_inst))
@@ -1706,46 +1723,69 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
                 dt = self.step_time
                 if replay_speed is not None:
                     dt /= replay_speed(n_inst)
-                # 처음 시작 
-                motion_ids, motion_times0 = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
+                motion_ids, _ = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
                 not_init_env_ids = torch.nonzero(self.lifetime).view(-1)
                 init_env_ids = (self.lifetime == 0).nonzero().view(-1)
-
+                
                 if replay_speed is not None:
                     dt = torch.tensor(dt, dtype=torch.float32, device=self.device)                  # list -> tensor
                 else:
                     dt = torch.tensor(dt, dtype=torch.float32, device=self.device).repeat(n_inst)   # float -> tensor
                 
-                if self.RANDOM_INIT:
-                    # initialize 된 게 아니라면
-                    # init 안된 친구는 dt를 계속 더해줌
-                    if(len(not_init_env_ids)):
-                        # self.goal_motion_times[not_init_env_ids] = self.goal_motion_times[not_init_env_ids] + torch.tensor(dt[not_init_env_ids.cpu()], dtype=torch.float32, device=self.device)
-                        self.goal_motion_times[not_init_env_ids] = self.goal_motion_times[not_init_env_ids] + dt[not_init_env_ids.cpu()]
-                    # init 된 친구는 0
-                    if(len(init_env_ids)):
-                        self.goal_motion_times[init_env_ids] = self.goal_motion_times[init_env_ids] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
 
-                else:
+                still_motion = torch.nonzero(self.offset_time).view(-1)
+                move_motion = (self.offset_time == 0).nonzero().view(-1)
+
+                # sill motion
+                if len(still_motion):
+                    # 1 씩 감소
+                    self.offset_time[still_motion] -= 1
+                    torch.clamp(self.offset_time, min=0) 
+                    # motion in still 그대로!
+                    self.goal_motion_times[still_motion] = self.goal_motion_times[still_motion]
+                    # print("still!!: ", self.offset_time.item(), self.goal_motion_times.item(), self.etime.item())
+                # motion starts!
+                if len(move_motion):
+                    move = self.getIntersection_Method1(not_init_env_ids, move_motion)
+                    not_move = self.getIntersection_Method1(init_env_ids, move_motion)
+
                     # init 안된 친구는 dt를 계속 더해줌
-                    if(len(not_init_env_ids)):
-                        self.goal_motion_times[not_init_env_ids] += dt[not_init_env_ids.cpu()]
-                    # init 된 친구는 0
-                    if(len(init_env_ids)):
-                        self.goal_motion_times[init_env_ids] = torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+                    if (len(move)):
+                        # print("move!! WITHOUT INIT: ", self.offset_time.item(), self.goal_motion_times.item(), self.etime.item())
+                        self.goal_motion_times[move] = self.goal_motion_times[move] + dt[move.cpu()]
+                    # init 된 친구는 0                        
+                    if (len(not_move)):
+                        # print("INIT")
+                        self.goal_motion_times[not_move] = self.goal_motion_times[not_move] + torch.zeros(len(not_move), dtype=torch.float32, device=self.device)
 
                 # humnaoid 시간 따로
                 self.motion_times = self.motion_times + dt
                 motion_times0 = self.goal_motion_times.cpu().numpy()
                 root_tensor, link_tensor, joint_tensor = ref_motion.state(motion_ids, motion_times0)
+                
+                # self.goal_motion_times가 etime을 over 했을 때 
+                over_etime = torch.nonzero(self.goal_motion_times - self.etime > 0.001).view(-1)
+                if len(over_etime):
+                    # over_time이면서 offset_time이 0 이하여야
+                    still_motion = (self.offset_time == 0).nonzero().view(-1)
+                    reset = self.getIntersection_Method1(over_etime, still_motion)
+
+                    # print("reset: ", reset)
+                    if len(reset):
+                        goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(reset))
+                        goal_offset_time = ref_motion.randomize_offset(len(reset))               # randomize_offset to init_env
+
+                        self.goal_motion_ids[reset] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
+                        self.goal_motion_times[reset] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
+                        
+                        self.etime[reset] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
+                        self.offset_time[reset] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
         
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
         
-        # if env is initialized, save root_offset
-        if(len(init_env_ids)):
-            self.init_root_offset[init_env_ids] = self.init_root_tensor[init_env_ids, 0, :3] - self.goal_root_tensor[init_env_ids, 0, :3]
+
 
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
