@@ -1976,3 +1976,21 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   # pink
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
             gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)   
+
+    def visualize_ego_ee(self):
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # pink
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))       # yellow
+        rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))    # pink
+        ee_rpos = self.goal_tensor[:, 0:3]
+        ee_lpos = self.ltemp[:, 0:3]
+        root_pos = torch.zeros_like(self.root_pos)
+        root_pos[:, 0], root_pos[:, 1] = self.root_pos[:, 0], self.root_pos[:, 1]
+        for i in range(len(self.envs)):
+            rhand_pos = ee_rpos + root_pos
+            lhand_pos = ee_lpos + root_pos
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[:, 0], rhand_pos[:, 1], rhand_pos[:, 2]), r=None)
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[:, 0], lhand_pos[:, 1], lhand_pos[:, 2]), r=None)
+            root_pose = gymapi.Transform(gymapi.Vec3(root_pos[:, 0], root_pos[:, 1], root_pos[:, 2]), r=None)
+            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)
+            gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)
