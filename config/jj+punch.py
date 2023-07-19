@@ -3,7 +3,7 @@ import numpy as np
 env_cls = "ICCGANHumanoid"
 env_params = dict(
     episode_length = 300,
-    motion_file = "assets/motions/gym/chest_open+walk_in_place.json"    # lower part
+    motion_file = "assets/motions/iccgan/punch.json"    # lower part
 )
 
 training_params = dict(
@@ -22,7 +22,7 @@ discriminators = {
         replay_speed = lambda n: np.random.uniform(0.8, 1.2, size=(n,))
     ),
     "punch/left_arm": dict(
-        motion_file = "assets/motions/iccgan/punch.json",
+        # motion_file = "assets/motions/iccgan/punch.json",
         key_links = ["left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         local_pos = True,
