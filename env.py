@@ -1836,23 +1836,6 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
 
         all_envs = n_envs == len(self.envs)
 
-        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
-            vel = self.goal_sp_min
-        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
-            vel = self.goal_sp_mean
-        else:
-            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
-        
-        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
-
-        if all_envs:
-            self.init_dist = dist
-            goal_timer.copy_(timer)
-        else:
-            self.init_dist[env_ids] = dist
-            goal_timer[env_ids] = timer
-        
         # ego-centric (ee_pos - origin)
         UP_AXIS = 2
         root_pos, root_orient = self.goal_root_pos[env_ids], self.goal_root_orient[env_ids]       # [n_envs, 3], [n_envs, 4]
