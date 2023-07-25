@@ -694,7 +694,12 @@ class ICCGANHumanoid(Env):
             for d in discs: samples[d.name] = real
         return self.observe_disc(samples)
 
-    def visualize_axis(self, gpos, gquat):
+    # def update_viewer(self):
+    #     super().update_viewer()
+    #     self.gym.clear_lines(self.viewer)
+    #     self.visualize_axis(self.link_pos[:, [0, 6, 7, 8], :], self.link_orient[:, [0, 6, 7, 8], :], scale = 0.2, y=False, z =False)
+
+    def visualize_axis(self, gpos, gquat, scale, x=True, y=True, z = True):
         gquat = gquat.view(-1, 4).cpu()                                                 # [num_envs x n_links, 4]
         tan_norm = utils.quat_to_tan_norm(gquat).cpu()
         rot_mat = utils.tan_norm_to_rotmat(tan_norm).cpu()
@@ -702,7 +707,7 @@ class ICCGANHumanoid(Env):
         tan, binorm, norm = tan.view(len(self.envs), -1, 3), norm.view(len(self.envs), -1, 3), binorm.view(len(self.envs), -1, 3)   # [num_envs, n_links, 3]
         
         start = gpos.cpu().numpy()                                                      # [5,n_links,3]
-        scale = 0.2
+
         x_end = (gpos.cpu() + tan * scale).cpu().numpy()
         z_end = (gpos.cpu() + binorm * scale).cpu().numpy()
         y_end = (gpos.cpu() + norm * scale).cpu().numpy()
@@ -710,28 +715,29 @@ class ICCGANHumanoid(Env):
         n_lines = 5
 
         # x-axis
-        for j in range(gpos.size(1)):
-            x_lines = np.stack([
-                np.stack((start[:, j, 0], start[:, j, 1], start[:, j, 2]+0.0015*i, x_end[:, j, 0], x_end[:, j, 1], x_end[:, j, 2]+0.0015*i), -1)
-                        for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
-            for e, l in zip(self.envs, x_lines):
-                self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])
-
+        if x:
+            for j in range(gpos.size(1)):
+                x_lines = np.stack([
+                    np.stack((start[:, j, 0], start[:, j, 1], start[:, j, 2]+0.0015*i, x_end[:, j, 0], x_end[:, j, 1], x_end[:, j, 2]+0.0015*i), -1)
+                            for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
+                for e, l in zip(self.envs, x_lines):
+                    self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])
         # y-axis
-        for j in range(gpos.size(1)):
-            ylines = np.stack([
-                np.stack((start[:, j, 0]+0.0015*i, start[:, j, 1], start[:, j, 2], y_end[:, j, 0]+0.0015*i, y_end[:, j, 1], y_end[:, j, 2]), -1)
-                        for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
-            for e, l in zip(self.envs, ylines):
-                self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
-
+        if y:
+            for j in range(gpos.size(1)):
+                ylines = np.stack([
+                    np.stack((start[:, j, 0]+0.0015*i, start[:, j, 1], start[:, j, 2], y_end[:, j, 0]+0.0015*i, y_end[:, j, 1], y_end[:, j, 2]), -1)
+                            for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
+                for e, l in zip(self.envs, ylines):
+                    self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
         # z-axis
-        for j in range(gpos.size(1)):
-            z_lines = np.stack([
-                np.stack((start[:, j, 0], start[:, j, 1]+0.0015*i, start[:, j, 2], z_end[:, j, 0], z_end[:, j, 1]+0.0015*i, z_end[:, j, 2]), -1)
-                        for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
-            for e, l in zip(self.envs, z_lines):
-                self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])
+        if z:
+            for j in range(gpos.size(1)):
+                z_lines = np.stack([
+                    np.stack((start[:, j, 0], start[:, j, 1]+0.0015*i, start[:, j, 2], z_end[:, j, 0], z_end[:, j, 1]+0.0015*i, z_end[:, j, 2]), -1)
+                            for i in range(n_lines)], -2)                                      # [n_envs, n_lines, 6]
+                for e, l in zip(self.envs, z_lines):
+                    self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])
         pass
     
     def get_link_len(self, p_idx, c_idx):
@@ -1278,27 +1284,27 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         super().update_viewer()
         self.gym.clear_lines(self.viewer)
 
-        #! what I added for ee position
-        # 1. rhand visualization
-        link_pos = self.link_pos
-        r_end = self.goal_tensor[:, 0:3].cpu().numpy()
+        # #! what I added for ee position
+        # # 1. rhand visualization
+        # link_pos = self.link_pos
+        # r_end = self.goal_tensor[:, 0:3].cpu().numpy()
 
-        for i in range(len(self.envs)):
-            rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0, 0))   # red
-            rhand_pos = r_end[i]
-            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
-            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
-        #!
+        # for i in range(len(self.envs)):
+        #     rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0, 0))   # red
+        #     rhand_pos = r_end[i]
+        #     rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
+        #     gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
+        # #!
 
-        # 2. lhand visualization
-        l_end = self.ltemp.cpu().numpy()
+        # # 2. lhand visualization
+        # l_end = self.ltemp.cpu().numpy()
 
-        for i in range(len(self.envs)):
-            lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 1, 0))   # green
-            lhand_pos = l_end[i]
-            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
-            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   
-        #!
+        # for i in range(len(self.envs)):
+        #     lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 1, 0))   # green
+        #     lhand_pos = l_end[i]
+        #     lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
+        #     gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   
+        # #!
 
     def _observe(self, env_ids):
         if env_ids is None:
