@@ -174,9 +174,11 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
     if has_goal_reward:
         buffer["r"] = []
 
+    # each for discriminator
     buffer_disc = {
         name: dict(fake=[], real=[], seq_len=[]) for name in env.discriminators.keys()
     }
+    # each for discriminator
     real_losses, fake_losses = {n:[] for n in buffer_disc.keys()}, {n:[] for n in buffer_disc.keys()}
     
     epoch = 0
@@ -186,7 +188,7 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
     while not env.request_quit:
         with torch.no_grad():
             obs, info = env.reset_done()    # reset_envs -> reset_goals -> 다음 obs observe
-            seq_len = info["ob_seq_lens"]
+            seq_len = info["ob_seq_lens"]   # for each environment, how many sequences character observed
             reward_weights = info["reward_weights"]
             actions, values, log_probs = model.act(obs, seq_len-1, stochastic=True)
             obs_, rews, dones, info = env.step(actions)
@@ -198,7 +200,7 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
             reals = info["disc_obs_expert"]
             disc_seq_len = info["disc_seq_len"]
 
-            values_ = model.evaluate(obs_, seq_len)
+            values_ = model.evaluate(obs_, seq_len)     # get next values from obs of next step
 
         buffer["s"].append(obs)
         buffer["a"].append(actions)
@@ -501,9 +503,9 @@ if __name__ == "__main__":
         if "view" in (config.env_cls).lower():
             pass
         else:
-            env.episode_length = 500000
+            env.episode_length = 200
 
-    value_dim = len(env.discriminators)+env.rew_dim
+    value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
     model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)
     discriminators = torch.nn.ModuleDict({
         name: Discriminator(dim) for name, dim in env.disc_dim.items()

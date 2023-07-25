@@ -129,7 +129,7 @@ class ACModel(torch.nn.Module):
                 torch.nn.ReLU6(),
                 torch.nn.Linear(1024, 512),
                 torch.nn.ReLU6(),
-                torch.nn.Linear(512, value_dim)
+                torch.nn.Linear(512, value_dim)     # value_dim = critic 개수
             )
             i = 0
             for n, p in self.mlp.named_parameters():
@@ -197,8 +197,9 @@ class ACModel(torch.nn.Module):
                 if n_inst > self.all_inst.size(0):
                     self.all_inst = torch.arange(n_inst, 
                         dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                s, _ = self.rnn(s)
-                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
+                s, _ = self.rnn(s)          # output s [n, 4, 256]
+                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))] # output s [n', 256]
+
             if g is not None:
                 s = torch.cat((s, g), -1)
             latent = self.mlp(s)
@@ -233,6 +234,7 @@ class ACModel(torch.nn.Module):
         s = s.view(*s.shape[:-1], -1, self.state_dim)
         return self.ob_normalizer(s) if norm else s, g
 
+    # get value
     def eval_(self, s, seq_end_frame, g, unnorm):
         v = self.critic(s, seq_end_frame, g)
         if unnorm and self.value_normalizer is not None:
@@ -242,25 +244,25 @@ class ACModel(torch.nn.Module):
     def act(self, obs, seq_end_frame, stochastic=None, unnorm=False):
         if stochastic is None:
             stochastic = self.training
-        s, g = self.observe(obs)
-        pi = self.actor(s, seq_end_frame, g)
+        s, g = self.observe(obs)            # normalize state
+        pi = self.actor(s, seq_end_frame, g)    # forward of Actor, outputs normal distribution
         if stochastic:
             a = pi.sample()
             lp = pi.log_prob(a)
             if g is not None:
                 g = g[...,:self.goal_dim]
-            return a, self.eval_(s, seq_end_frame, g, unnorm), lp
+            return a, self.eval_(s, seq_end_frame, g, unnorm), lp   # actions, values, log_probs
         else:
-            return pi.mean,
+            return pi.mean,     # [num_envs, action_dim]
 
     def evaluate(self, obs, seq_end_frame, unnorm=False):
-        s, g = self.observe(obs)
+        s, g = self.observe(obs)                        # normalize state
         if g is not None:
             g = g[...,:self.goal_dim]
-        return self.eval_(s, seq_end_frame, g, unnorm)
+        return self.eval_(s, seq_end_frame, g, unnorm)  # get value
     
     def forward(self, obs, seq_end_frame, unnorm=False):
-        s, g = self.observe(obs)
+        s, g = self.observe(obs)                    # normalize state
         pi = self.actor(s, seq_end_frame, g)
         if g is not None:
             g = g[...,:self.goal_dim]
