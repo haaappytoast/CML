@@ -352,6 +352,10 @@ def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
                     rewards = rewards.mean(0).cpu().tolist()
                     if rewards_task is not None:
                         rewards_task = rewards_task.mean(0).cpu().tolist()
+                else:
+                    rewards = rewards.view(-1, rewards.size(-1))
+                    reward_tot = rewards.mean(0).item()                    
+                    rewards = rewards.mean(0).cpu().tolist()
 
             n_samples = advantages.size(0)
             epoch += 1
