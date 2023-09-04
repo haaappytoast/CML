@@ -2167,9 +2167,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 l_key_links = discs[0].key_links
         # goal_motion_times
         up_over_env_ids = torch.nonzero(self.goal_motion_times[..., 0] > up_motion_length[0])
-        l_over_env_ids = torch.nonzero(self.goal_motion_times[..., 1] > l_motion_length[0])
         up_in_env_ids = torch.nonzero(self.goal_motion_times[..., 0] <= up_motion_length[0])
-        l_in_env_ids = torch.nonzero(self.goal_motion_times[..., 1] <= l_motion_length[0])
+        if 'l_motion_length' in locals():
+            l_over_env_ids = torch.nonzero(self.goal_motion_times[..., 1] > l_motion_length[0])
+            l_in_env_ids = torch.nonzero(self.goal_motion_times[..., 1] <= l_motion_length[0])
+        else:
+            l_over_env_ids, l_in_env_ids, l_key_links = [], [],[]
         return up_over_env_ids, up_in_env_ids, up_key_links, l_over_env_ids, l_in_env_ids, l_key_links
 
     def create_motion_info(self):
@@ -2185,6 +2188,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         self.offset_time = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
         self.etime = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
+
+        #! heuristic
+        rlh_localPos = np.load("/home/vml/cml_ws/CML/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
+        rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
+        r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
+        self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
+
 
     def create_tensors(self):
         super().create_tensors()
@@ -2216,6 +2226,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.motion_times[env_ids] = torch.tensor(motion_times, dtype=torch.float32, device=self.device)
 
         # initialize goal_motion
+        l_goal_motion_ids = None
         for ref_motion, _, _, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
                 up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
@@ -2224,17 +2235,17 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             if "left" in discs[0].name:
                 l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
                 l_goal_offset_time = ref_motion.randomize_offset(len(env_ids))               # randomize_offset to init_env
-            else: 
+            else:
                 pass
 
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
-        self.goal_motion_ids[env_ids, 1] = torch.tensor(l_goal_motion_ids, dtype=torch.int32, device=self.device)
-        
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
-        self.etime[env_ids, 1] = torch.tensor(l_goal_motion_etime, dtype=torch.float32, device=self.device)
-
         self.offset_time[env_ids, 0] = torch.tensor(up_goal_offset_time, dtype=torch.float32, device=self.device)
-        self.offset_time[env_ids, 1] = torch.tensor(l_goal_offset_time, dtype=torch.float32, device=self.device)
+
+        if (l_goal_motion_ids != None):
+            self.goal_motion_ids[env_ids, 1] = torch.tensor(l_goal_motion_ids, dtype=torch.int32, device=self.device)
+            self.etime[env_ids, 1] = torch.tensor(l_goal_motion_etime, dtype=torch.float32, device=self.device)
+            self.offset_time[env_ids, 1] = torch.tensor(l_goal_offset_time, dtype=torch.float32, device=self.device)
 
         # print("\n---------------INIT STATE: {}---------------\n".format(env_ids))
         
@@ -2259,7 +2270,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
-        self.visualize_goal_positions()
+        # self.visualize_goal_positions()
+        self.visualize_control_positions()
         # self.visualize_origin()
         # self.visualize_ego_ee()
     
@@ -2273,19 +2285,10 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 dt_tensor = torch.tensor(dt, dtype=torch.float32, device=device).repeat(n_inst)   # float -> tensor
             return dt, dt_tensor
         
-        def getIntersection_Method1(a, b):
-            a = a.detach().cpu().numpy()
-            b = b.detach().cpu().numpy()
-            intersection = np.intersect1d(a, b)
-            return torch.from_numpy(intersection)
-        
-        def get_env_ids_infos(lifetime, offset_time):
+        def get_env_ids_infos(lifetime):
             not_init_env_ids = torch.nonzero(lifetime).view(-1)
             init_env_ids = (lifetime == 0).nonzero().view(-1)
-            
-            still_motion = torch.nonzero(offset_time).view(-1)
-            move_motion = (offset_time == 0).nonzero().view(-1)
-            return not_init_env_ids, init_env_ids, still_motion, move_motion
+            return not_init_env_ids, init_env_ids
         
         n_inst = len(self.envs)
         env_ids = list(range(n_inst))
@@ -2299,30 +2302,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             if "upper" in discs[0].name or "full" in discs[0].name:
                 dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
                 motion_ids, _ = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
-                not_init_env_ids, init_env_ids, still_motion, move_motion = get_env_ids_infos(self.lifetime, self.offset_time[:, 0])
-                # sill motion
-                if len(still_motion):
-                    # 1 씩 감소
-                    self.offset_time[still_motion, 0] -= 1
-                    torch.clamp(self.offset_time[:, 0], min=0) 
-                    # motion in still 그대로!
-                    print("self.goal_motion_times[still_motion, 0]: ", self.goal_motion_times[still_motion, 0])
-                    self.goal_motion_times[still_motion, 0] = self.goal_motion_times[still_motion, 0]
-                # motion starts!
-                if len(move_motion):
-                    move = getIntersection_Method1(not_init_env_ids, move_motion)
-                    not_move = getIntersection_Method1(init_env_ids, move_motion)
+                not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
 
-                    # init 안된 친구는 dt를 계속 더해줌
-                    if (len(move)):
-                        # print("move!! WITHOUT INIT: ", self.offset_time.item(), self.goal_motion_times.item(), self.etime.item())
-                        self.goal_motion_times[move, 0] = self.goal_motion_times[move, 0] + dt_tensor[move.cpu()]
-                    # init 된 친구는 0                        
-                    if (len(not_move)):
-                        # print("INIT")
-                        self.goal_motion_times[not_move, 0] = self.goal_motion_times[not_move, 0] + torch.zeros(len(not_move), dtype=torch.float32, device=self.device)
-
-                # self.motion_times = self.motion_times + dt_tensor
+                if len(not_init_env_ids):
+                    self.goal_motion_times[not_init_env_ids, 0] = self.goal_motion_times[not_init_env_ids, 0] + dt_tensor[not_init_env_ids.cpu()]
+                elif len(init_env_ids):
+                    self.goal_motion_times[init_env_ids, 0] = self.goal_motion_times[init_env_ids, 0] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+            
                 motion_times0 = self.goal_motion_times[:, 0].cpu().numpy()
                 up_root_tensor, up_link_tensor, up_joint_tensor = ref_motion.state(motion_ids, motion_times0)
 
@@ -2336,9 +2322,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 over_etime = torch.nonzero(self.goal_motion_times[:, 0] - self.etime[:, 0] > 0.001).view(-1)
                 if len(over_etime):
                     # over_time이면서 offset_time이 0 이하여야
-                    still_motion = (self.offset_time[:, 0] == 0).nonzero().view(-1)
-                    reset = getIntersection_Method1(over_etime, still_motion)
-
+                    # still_motion = (self.offset_time[:, 1] == 0).nonzero().view(-1)
+                    # reset = getIntersection_Method1(over_etime, still_motion)
+                    reset = over_etime
                     # print("reset: ", reset)
                     if len(reset):
                         goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(reset))
@@ -2349,60 +2335,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                         
                         self.etime[reset, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
                         self.offset_time[reset, 0] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
-
-            elif "left" in discs[0].name:
-                dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
-                motion_ids, _ = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
-                not_init_env_ids, init_env_ids, still_motion, move_motion = get_env_ids_infos(self.lifetime, self.offset_time[:, 0])
-                # sill motion
-                if len(still_motion):
-                    # 1 씩 감소
-                    self.offset_time[still_motion, 1] -= 1
-                    torch.clamp(self.offset_time[:, 1], min=0) 
-                    # motion in still 그대로!
-                    self.goal_motion_times[still_motion, 1] = self.goal_motion_times[still_motion, 1]
-                # motion starts!
-                if len(move_motion):
-                    move = getIntersection_Method1(not_init_env_ids, move_motion)
-                    not_move = getIntersection_Method1(init_env_ids, move_motion)
-
-                    # init 안된 친구는 dt를 계속 더해줌
-                    if (len(move)):
-                        # print("move!! WITHOUT INIT: ", self.offset_time.item(), self.goal_motion_times.item(), self.etime.item())
-                        self.goal_motion_times[move, 1] = self.goal_motion_times[move, 1] + dt_tensor[move.cpu()]
-                    # init 된 친구는 0                        
-                    if (len(not_move)):
-                        # print("INIT")
-                        self.goal_motion_times[not_move, 1] = self.goal_motion_times[not_move, 1] + torch.zeros(len(not_move), dtype=torch.float32, device=self.device)
-
-                # self.motion_times = self.motion_times + dt_tensor
-                motion_times0 = self.goal_motion_times[:, 1].cpu().numpy()
-
-                l_root_tensor, l_link_tensor, l_joint_tensor = ref_motion.state(motion_ids, motion_times0)
-
-                root_tensor[env_ids, 1] = l_root_tensor
-                link_tensor[..., key_links, :] = l_link_tensor[..., key_links, :]
-                for idx in key_links:
-                    joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
-                    l_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
-
-                # self.goal_motion_times가 etime을 over 했을 때 
-                over_etime = torch.nonzero(self.goal_motion_times[:, 1] - self.etime[:, 1] > 0.001).view(-1)
-                if len(over_etime):
-                    # over_time이면서 offset_time이 0 이하여야
-                    still_motion = (self.offset_time[:, 1] == 0).nonzero().view(-1)
-                    reset = getIntersection_Method1(over_etime, still_motion)
-
-                    # print("reset: ", reset)
-                    if len(reset):
-                        goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(reset))
-                        goal_offset_time = ref_motion.randomize_offset(len(reset))               # randomize_offset to init_env
-
-                        self.goal_motion_ids[reset, 1] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
-                        self.goal_motion_times[reset, 1] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
-                        
-                        self.etime[reset, 1] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
-                        self.offset_time[reset, 1] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
             
             else:
                 dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
@@ -2419,7 +2351,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
-
 
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
@@ -2456,6 +2387,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         n_envs = len(env_ids)
         ee_links = [5, 8]  # right hand, left hand
         ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+        ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
 
         all_envs = n_envs == len(self.envs)
         def global_to_ego(root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
@@ -2477,8 +2409,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             return ego_ee_pos
         
         # ego-centric (ee_pos - origin)
-        rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], ee_pos[:, 0, :], 2)
-        lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], ee_pos[:, 1, :], 2)
+        # rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], ee_pos[:, 0, :], 2)
+        # lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], ee_pos[:, 1, :], 2)
+        #! control egocentric position
+        rcontrol_pos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        lcontrol_pos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], rcontrol_pos, 2)
+        lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], lcontrol_pos, 2)
 
         #! rhand position
         if n_envs == len(self.envs):
@@ -2547,20 +2484,22 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         up_dir[..., UP_AXIS] = 1
         heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
 
-        #! ADDED rhand reward
+        #! ADDED rcontrol reward
         target_ego_rhand_pos = goal_tensor[..., :3]
-        rhand_pos = self.link_pos[:, self.r_hand_link] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device)) 
-        ego_rhand_pos = rhand_pos - origin
+        rhand_pos = self.link_pos[:, self.r_hand_link]
+        rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos)
+        ego_rhand_pos = rcontrol_pos - origin
         ego_rhand_pos = rotatepoint(heading_orient_inv, ego_rhand_pos)          # N x 3
 
         e = torch.linalg.norm(target_ego_rhand_pos.sub(ego_rhand_pos), ord=2, dim=-1).div_(rarm_len)
         rhand_rew = e.mul_(-2).exp_()
         #! ADDED rhand reward
 
-        #! ADDED lhand reward
+        #! ADDED lcontrol reward
         target_ego_lhand_pos = goal_tensor[..., 3:6]
         lhand_pos = self.link_pos[:, self.l_hand_link]
-        ego_lhand_pos = lhand_pos - origin
+        lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos)
+        ego_lhand_pos = lcontrol_pos - origin
         ego_lhand_pos = rotatepoint(heading_orient_inv, ego_lhand_pos)          # N x 3
 
         l_e = torch.linalg.norm(target_ego_lhand_pos.sub(ego_lhand_pos), ord=2, dim=-1).div_(larm_len)
@@ -2596,14 +2535,32 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             rhand_pos = ee_pos[i, 1]
             lhand_pos = ee_pos[i, 2]
             root_pos = ee_pos[i, 3]
+            
+
             head_pose = gymapi.Transform(gymapi.Vec3(head_pos[0], head_pos[1], head_pos[2]), r=None)
             rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
             lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
             root_pose = gymapi.Transform(gymapi.Vec3(root_pos[0], root_pos[1], root_pos[2]), r=None)
+
+
             gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)    # white 
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   # pink
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
             gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)   
+
+    def visualize_control_positions(self):
+        ee_links = [2, 5, 8, 0]
+        ee_pos = self.goal_link_pos[:, ee_links, :]      # [num_envs, 3, ee_links] 
+        ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 0, 0))   # pink
+
+        for i in range(len(self.envs)):
+            rcontrol_pos = ee_pos[i, 1] + rotatepoint(ee_rot[i, 1], self.r_lpos.to(self.device))
+            lcontrol_pos = ee_pos[i, 2] + rotatepoint(ee_rot[i, 2], self.l_lpos.to(self.device))
+            rcontrol_pose = gymapi.Transform(gymapi.Vec3(rcontrol_pos[0], rcontrol_pos[1], rcontrol_pos[2]), r=None)
+            lcontrol_pose = gymapi.Transform(gymapi.Vec3(lcontrol_pos[0], lcontrol_pos[1], lcontrol_pos[2]), r=None)
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], rcontrol_pose)   # pink
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lcontrol_pose)
 
     def visualize_goal_positions(self):
         up_ee_links = [3, 4, 5]
@@ -2613,6 +2570,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # pink
         rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))       # yellow
         rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))    # pink
+
         ee_pos = self.goal_link_pos
         for i in range(len(self.envs)):
             for link in up_ee_links:
@@ -2629,8 +2587,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
 
     def visualize_ego_ee(self):
-        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 1))       # pink
-        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 1))       # yellow
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # pink
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.3))       # yellow
         rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))    # pink
         ee_rpos = self.goal_tensor[:, 0:3]
         ee_lpos = self.goal_tensor[:, 3:6]
@@ -2639,11 +2597,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         for i in range(len(self.envs)):
             rhand_pos = ee_rpos + root_pos
             lhand_pos = ee_lpos + root_pos
-            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[:, 0], rhand_pos[:, 1], rhand_pos[:, 2]), r=None)
-            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[:, 0], lhand_pos[:, 1], lhand_pos[:, 2]), r=None)
-            root_pose = gymapi.Transform(gymapi.Vec3(root_pos[:, 0], root_pos[:, 1], root_pos[:, 2]), r=None)
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[i, 0], rhand_pos[i, 1], rhand_pos[i, 2]), r=None)
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[i, 0], lhand_pos[i, 1], lhand_pos[i, 2]), r=None)
+            root_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0], root_pos[i, 1], root_pos[i, 2]), r=None)
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)
             gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)
-
-            
