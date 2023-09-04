@@ -1,6 +1,6 @@
 import numpy as np
-
-env_cls = "ICCGANHumanoidEE_ref"
+# python main.py config/usermotion1+walk_in_place.py --ckpt 0904_usermotion --server local --headless
+env_cls = "ICCGANHumanoidVR"
 env_params = dict(
     episode_length = 300,
     motion_file = "assets/motions/gym/chest_open+walk_in_place.json"
@@ -14,7 +14,8 @@ training_params = dict(
 
 discriminators = {
     "front_jumping_jack/upper": dict(
-        motion_file = "assets/motions/gym/front_jumping_jack.json",
+        # motion_file = "assets/motions/gym/front_jumping_jack.json",
+        motion_file = "assets/retargeted/cml@motion1.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         local_pos = True,
