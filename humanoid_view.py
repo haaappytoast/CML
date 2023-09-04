@@ -859,7 +859,7 @@ class HumanoidView(ICCGANHumanoid):
         self.gym.clear_lines(self.viewer)
 
         self.visualize_ee_positions()
-
+        self.temporary()
         self.visualize_axis(self.link_pos[:,[2, 5, 8], :], self.link_orient[:,[2, 5, 8], :], scale = 0.2, y=True, z =True)
     #! here no forces applied
     def apply_actions(self, actions):
@@ -944,6 +944,38 @@ class HumanoidView(ICCGANHumanoid):
             head_pos = ee_pos[i, 0]
             rhand_pos = ee_pos[i, 1]
             lhand_pos = ee_pos[i, 2]
+
+            head_pose = gymapi.Transform(gymapi.Vec3(head_pos[0], head_pos[1], head_pos[2]), r=None)
+            rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
+            lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
+
+            gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)   
+            gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)
+
+    def temporary(self):
+        time = ((self.simulation_step-1) % 289)
+        rlh_localPos = np.load("assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
+        rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32)
+        r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
+        print(r_localpos[time], "/ ", l_localpos[time])
+
+        hsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 1))   # white
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 1, 0.5))   # yellow
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.5, 1))   # pink
+        
+        ee_links = [2, 5, 8]
+        ee_rot = self.link_orient[:, ee_links, :]   # [num_envs, 3, 4]
+        ee_pos = self.link_pos[:, ee_links, :]
+
+        h_localpos = ee_pos[:, 0] + rotatepoint(ee_rot[:, 0], h_localpos.to(self.device))
+        r_localpos = ee_pos[:, 1] + rotatepoint(ee_rot[:, 1], r_localpos.to(self.device))
+        l_localpos = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], l_localpos.to(self.device))
+
+        for i in range(len(self.envs)):
+            head_pos = h_localpos[time]
+            rhand_pos = r_localpos[time]
+            lhand_pos = l_localpos[time]
 
             head_pose = gymapi.Transform(gymapi.Vec3(head_pos[0], head_pos[1], head_pos[2]), r=None)
             rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
