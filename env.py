@@ -2192,7 +2192,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.etime = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
 
         #! heuristic
-        rlh_localPos = np.load("/home/vml/cml_ws/CML/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
+        rlh_localPos = np.load(os.getcwd() + "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
         self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
