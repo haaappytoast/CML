@@ -4,7 +4,7 @@ import os
 from isaacgym import gymapi, gymtorch
 import torch
 import utils
-from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized
+from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized, quat_inverse
 from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView
@@ -2140,7 +2140,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
 class ICCGANHumanoidVR(ICCGANHumanoidEE):  
     RANDOM_INIT = True
     EE_SIZE = 2
-    GOAL_TENSOR_DIM = 3 + 3 + 3         # global position of right/left hand / head controller target (X, Y, Z) - where they should reach
+    GOAL_TENSOR_DIM = 3 + 3 + 3 + 4                 # global position of right/left hand / head controller target (X, Y, Z) - where they should reach
 
     def step(self, actions):
         # goal visualize
@@ -2427,11 +2427,16 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         lcontrol_pos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
         hmd_pos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
         
+
         #! need to change when l_goal_root_pos is used in three discriminators
         rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], rcontrol_pos, 2)
         # lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], lcontrol_pos, 2)
         lhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], lcontrol_pos, 2)
         hmd_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], hmd_pos, 2)
+
+        # rotation (#!300 should be changed with respect to the motion clip)
+        hmd_lrot = self.h_lrot[self.lifetime % 300]                     # [num_envs, 4]
+        hmd_grot = quat_mul(ee_rot[:, 2], hmd_lrot)                     # [num_envs, 4]
 
         #! rhand position
         if n_envs == len(self.envs):
@@ -2465,6 +2470,19 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             goal_tensor[env_ids, 1+6] = hmd_ego_ee_pos[:, 1]
             goal_tensor[env_ids, 2+6] = hmd_ego_ee_pos[:, 2]
         #!
+
+        #! ADDED hmd rotation
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0+9] = hmd_grot[:, 0]
+            goal_tensor[:, 1+9] = hmd_grot[:, 1]
+            goal_tensor[:, 2+9] = hmd_grot[:, 2]
+            goal_tensor[:, 3+9] = hmd_grot[:, 3]
+        else:
+            goal_tensor[env_ids, 0+9] = hmd_grot[:, 0]
+            goal_tensor[env_ids, 1+9] = hmd_grot[:, 1]
+            goal_tensor[env_ids, 2+9] = hmd_grot[:, 2]
+            goal_tensor[env_ids, 3+9] = hmd_grot[:, 3]
+        #!        
 
     def reward(self, goal_tensor=None, goal_timer=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
@@ -2541,12 +2559,22 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         ego_hmd_lpos = rotatepoint(heading_orient_inv, ego_hmd_lpos)          # N x 3
 
         hmd_e = torch.linalg.norm(target_ego_hmd_pos.sub(ego_hmd_lpos), ord=2, dim=-1)
-        hmd_e_rew = hmd_e.mul_(-2).exp_()
+        hmd_e_rew = hmd_e.mul_(-3).exp_()
         #! ADDED hmd POSITION reward
 
-        #! should add hmd ORIENTATION reward
+        #! ADDED hmd ORIENTATION reward
+        target_g_hmd_rot = goal_tensor[..., 9:13]
+        head_rot = self.link_orient[:, self.head]
+        diff_grot= quat_mul(quat_inverse(head_rot), target_g_hmd_rot)
+        ego_diffrot = quat_mul(heading_orient_inv, diff_grot)
 
-        total_r = (1.0/3.0 * rhand_rew + 1.0/3.0 * lhand_rew + 1.0/3.0 * hmd_e_rew)        
+        hmd_rot_e = torch.linalg.norm(ego_diffrot, ord=2, dim=-1)
+        hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
+        #! ADDED hmd ORIENTATION reward
+
+        # print("rhand_rew: ", torch.mean(rhand_rew, dim=0).item(), "lhand_rew: ",  torch.mean(lhand_rew, dim=0).item(), \
+        #       "hmd_e_rew: ", torch.mean(hmd_e_rew, dim=0).item(), "hmd_rot_e_rew: ", torch.mean(hmd_rot_e_rew, dim=0).item(),)
+        total_r = (1.0/4.0 * rhand_rew + 1.0/4.0 * lhand_rew + 1.0/4.0 * hmd_e_rew + 1.0/4.0 * hmd_rot_e_rew)        
         return total_r.unsqueeze_(-1)
     
     def visualize_origin(self):
