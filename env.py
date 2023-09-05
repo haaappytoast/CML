@@ -5,6 +5,7 @@ from isaacgym import gymapi, gymtorch
 import torch
 import utils
 from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized
+from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView
 from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
@@ -2194,8 +2195,15 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! heuristic
         rlh_localPos = np.load(os.getcwd() + "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
+        
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
+        #! Should this not be averaged?? 
         self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
+        
+        rlh_localRot = np.load(os.getcwd() + "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy")
+        rlh_localRot = torch.tensor(rlh_localRot, dtype=torch.float32, device=self.device)
+        self.h_lrot = rlh_localRot[..., 8:12]
+        # self.r_lrot, self.l_lrot, self.h_lrot = torch.mean(r_localRot, dim=0), torch.mean(l_localRot, dim=0), torch.mean(h_localRot, dim=0) #(3, )
 
 
     def create_tensors(self):
@@ -2272,8 +2280,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
-        # self.visualize_goal_positions()
+        self.visualize_goal_positions()
         self.visualize_control_positions()
+        self.visualize_hmd_rotations()
         # self.visualize_origin()
         # self.visualize_ego_ee()
     
@@ -2599,6 +2608,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], hmd_pose)        # black
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], rcontrol_pose)   # black
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lcontrol_pose)   # black
+
+    def visualize_hmd_rotations(self):
+        hmd_position = self.link_pos[:, [2], :] + rotatepoint(self.link_orient[:, [2], :], self.h_lpos.to(self.device))    # [num_envs, frame_num, 4]
+        hmd_lrot = self.h_lrot[self.lifetime % 300].unsqueeze(dim=-2)
+        hmd_grot = quat_mul(self.link_orient[:, [2], :], hmd_lrot)   # [num_envs, frame_num, 4]
+        self.visualize_axis(hmd_position, hmd_grot, scale = 0.2, y=0.2, z =0.2)  # orientation: [num_envs, 1, 4]
 
     def visualize_goal_positions(self):
         up_ee_links = [3, 4, 5]
