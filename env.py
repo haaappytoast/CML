@@ -2139,6 +2139,8 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
 class ICCGANHumanoidVR(ICCGANHumanoidEE):  
     RANDOM_INIT = True
     EE_SIZE = 2
+    GOAL_TENSOR_DIM = 3 + 3 + 3         # global position of right/left hand / head controller target (X, Y, Z) - where they should reach
+
     def step(self, actions):
         # goal visualize
         self._motion_sync()
@@ -2385,7 +2387,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         # reset하는 env 개수
         n_envs = len(env_ids)
-        ee_links = [5, 8]  # right hand, left hand
+        ee_links = [5, 8, 2]  # right hand, left hand, head
         ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
 
@@ -2414,8 +2416,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! control egocentric position
         rcontrol_pos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
         lcontrol_pos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        hmd_pos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
+        
+        #! need to change when l_goal_root_pos is used in three discriminators
         rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], rcontrol_pos, 2)
-        lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], lcontrol_pos, 2)
+        # lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], lcontrol_pos, 2)
+        lhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], lcontrol_pos, 2)
+        hmd_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], hmd_pos, 2)
 
         #! rhand position
         if n_envs == len(self.envs):
@@ -2437,6 +2444,17 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             goal_tensor[env_ids, 0+3] = lhand_ego_ee_pos[:, 0]
             goal_tensor[env_ids, 1+3] = lhand_ego_ee_pos[:, 1]
             goal_tensor[env_ids, 2+3] = lhand_ego_ee_pos[:, 2]
+        #!
+
+        #! ADDED hmd position
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0+6] = hmd_ego_ee_pos[:, 0]
+            goal_tensor[:, 1+6] = hmd_ego_ee_pos[:, 1]
+            goal_tensor[:, 2+6] = hmd_ego_ee_pos[:, 2]
+        else:
+            goal_tensor[env_ids, 0+6] = hmd_ego_ee_pos[:, 0]
+            goal_tensor[env_ids, 1+6] = hmd_ego_ee_pos[:, 1]
+            goal_tensor[env_ids, 2+6] = hmd_ego_ee_pos[:, 2]
         #!
 
     def reward(self, goal_tensor=None, goal_timer=None):
@@ -2506,7 +2524,20 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         lhand_rew = l_e.mul_(-2).exp_()
         #! ADDED lhand reward
 
-        total_r = (0.5 * rhand_rew + 0.5 * lhand_rew)        
+        #! ADDED hmd POSITION reward
+        target_ego_hmd_pos = goal_tensor[..., 6:9]
+        hmd_pos = self.link_pos[:, self.head]
+        hmd_pos = hmd_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos)
+        ego_hmd_lpos = hmd_pos - origin
+        ego_hmd_lpos = rotatepoint(heading_orient_inv, ego_hmd_lpos)          # N x 3
+
+        hmd_e = torch.linalg.norm(target_ego_hmd_pos.sub(ego_hmd_lpos), ord=2, dim=-1)
+        hmd_e_rew = hmd_e.mul_(-2).exp_()
+        #! ADDED hmd POSITION reward
+
+        #! should add hmd ORIENTATION reward
+
+        total_r = (1.0/3.0 * rhand_rew + 1.0/3.0 * lhand_rew + 1.0/3.0 * hmd_e_rew)        
         return total_r.unsqueeze_(-1)
     
     def visualize_origin(self):
@@ -2550,17 +2581,24 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
     def visualize_control_positions(self):
         ee_links = [2, 5, 8, 0]
-        ee_pos = self.goal_link_pos[:, ee_links, :]      # [num_envs, 3, ee_links] 
+        ee_pos = self.goal_link_pos[:, ee_links, :]      # [num_envs, 3, ee_links]
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
         lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 0, 0))   # pink
 
+        curr_ee_rot = self.link_orient[:, ee_links, :]   # [num_envs, 3, 4]
+        curr_ee_pos = self.link_pos[:, ee_links, :]
+
         for i in range(len(self.envs)):
+            hmd_pos      = ee_pos[i, 0] + rotatepoint(ee_rot[i, 0], self.h_lpos.to(self.device))
             rcontrol_pos = ee_pos[i, 1] + rotatepoint(ee_rot[i, 1], self.r_lpos.to(self.device))
             lcontrol_pos = ee_pos[i, 2] + rotatepoint(ee_rot[i, 2], self.l_lpos.to(self.device))
+
+            hmd_pose = gymapi.Transform(gymapi.Vec3(hmd_pos[0], hmd_pos[1], hmd_pos[2]), r=None)
             rcontrol_pose = gymapi.Transform(gymapi.Vec3(rcontrol_pos[0], rcontrol_pos[1], rcontrol_pos[2]), r=None)
             lcontrol_pose = gymapi.Transform(gymapi.Vec3(lcontrol_pos[0], lcontrol_pos[1], lcontrol_pos[2]), r=None)
-            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], rcontrol_pose)   # pink
-            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lcontrol_pose)
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], hmd_pose)        # black
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], rcontrol_pose)   # black
+            gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lcontrol_pose)   # black
 
     def visualize_goal_positions(self):
         up_ee_links = [3, 4, 5]
