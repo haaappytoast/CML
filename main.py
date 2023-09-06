@@ -141,7 +141,7 @@ def test(env, model):
             rewards_tot = 0
             count = 0
 
-def train(env, model, ckpt_dir, training_params, resumed_optimizer=None):
+def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_optimizer=None):
     if ckpt_dir is not None:
         logger = SummaryWriter(ckpt_dir)
     else:
@@ -477,13 +477,19 @@ if __name__ == "__main__":
     if settings.headless:
         config.env_params['graphics_device'] = -1
 
-
+    if hasattr(config, "reward_coeff"):
+        reward_coeff = config.reward_coeff
+        # reward_coeff = namedtuple('x', reward_coeff.keys())(*reward_coeff.values())
+    else:
+        reward_coeff = dict(dummy = None)       # HumanoidVR 말고는 필요없음
+        
     if hasattr(config, "training_params"):
         TRAINING_PARAMS.update(config.training_params)
     if not TRAINING_PARAMS["save_interval"]:
         TRAINING_PARAMS["save_interval"] = TRAINING_PARAMS["max_epochs"]
     print(TRAINING_PARAMS)
     training_params = namedtuple('x', TRAINING_PARAMS.keys())(*TRAINING_PARAMS.values())
+
     if hasattr(config, "discriminators"):
         discriminators = {
             name: env.DiscriminatorConfig(**prop)
@@ -501,7 +507,8 @@ if __name__ == "__main__":
         control_mode=CONTROL_MODE,
         discriminators=discriminators,
         compute_device=settings.device, 
-        **config.env_params
+        **config.env_params,
+        **reward_coeff
     )
     if settings.test:
         if "view" in (config.env_cls).lower():
@@ -555,12 +562,12 @@ if __name__ == "__main__":
                 optim_ckpt = settings.resume + "_optims"
                 if os.path.exists(optim_ckpt):
                     resumed_optimizer = torch.load(optim_ckpt, map_location=torch.device(settings.device))      # loaded model
-                    train(env, model, settings.ckpt, training_params, resumed_optimizer)
+                    train(env, model, settings.ckpt, training_params, reward_coeff, resumed_optimizer)
                 else:
-                    train(env, model, settings.ckpt, training_params)
+                    train(env, model, settings.ckpt, training_params, reward_coeff)
 
             else:
                 raise ValueError("Please correctly type checkpoint path to resume training")
 
         else:
-            train(env, model, settings.ckpt, training_params)
+            train(env, model, settings.ckpt, training_params, reward_coeff)

@@ -12,8 +12,15 @@ training_params = dict(
     terminate_reward = -1
 )
 
+reward_coeff = dict(
+    rhand_pos = 1.0/4.0,
+    lhand_pos = 1.0/4.0,
+    hmd_pos = 1.0/4.0,
+    hmd_rot = 1.0/4.0
+)
+
 discriminators = {
-    "front_jumping_jack/upper": dict(
+    "usermotion1/upper": dict(
         # motion_file = "assets/motions/gym/front_jumping_jack.json",
         motion_file = "assets/retargeted/cml@motion1.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],

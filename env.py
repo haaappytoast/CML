@@ -2142,6 +2142,18 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     EE_SIZE = 2
     GOAL_TENSOR_DIM = 3 + 3 + 3 + 4                 # global position of right/left hand / head controller target (X, Y, Z) - where they should reach
 
+    RPOS_COEFF = 0.25
+    LPOS_COEFF = 0.25
+    HPOS_COEFF = 0.25
+    HROT_COEFF = 0.25
+    
+    def __init__(self, *args, **kwargs):
+        self.rpos_coeff = parse_kwarg(kwargs, "rhand_pos", self.RPOS_COEFF)
+        self.lpos_coeff = parse_kwarg(kwargs, "lhand_pos", self.LPOS_COEFF)
+        self.hpos_coeff = parse_kwarg(kwargs, "hmd_pos", self.HPOS_COEFF)
+        self.hrot_coeff = parse_kwarg(kwargs, "hmd_rot", self.HROT_COEFF)
+        super().__init__(*args, **kwargs)
+
     def step(self, actions):
         # goal visualize
         self._motion_sync()
@@ -2574,7 +2586,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         # print("rhand_rew: ", torch.mean(rhand_rew, dim=0).item(), "lhand_rew: ",  torch.mean(lhand_rew, dim=0).item(), \
         #       "hmd_e_rew: ", torch.mean(hmd_e_rew, dim=0).item(), "hmd_rot_e_rew: ", torch.mean(hmd_rot_e_rew, dim=0).item(),)
-        total_r = (1.0/4.0 * rhand_rew + 1.0/4.0 * lhand_rew + 1.0/4.0 * hmd_e_rew + 1.0/4.0 * hmd_rot_e_rew)        
+        total_r = (self.rpos_coeff * rhand_rew + self.lpos_coeff * lhand_rew \
+                    + self.hpos_coeff * hmd_e_rew + self.hrot_coeff * hmd_rot_e_rew)       
         return total_r.unsqueeze_(-1)
     
     def visualize_origin(self):
