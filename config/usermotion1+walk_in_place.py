@@ -19,6 +19,19 @@ reward_coeff = dict(
     hmd_rot = 1.0/4.0
 )
 
+sensor_input = { 
+    "train" : dict(
+        rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
+        rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
+        xy_pressed = "/assets/retargeted/MetaAvatar@control1@xy_pressed.npy"
+    ),
+    "test" : dict(
+        rlh_localPos = "temp",
+        rlh_localRot = "temp",
+        xy_pressed = "temp"
+    )
+}
+
 discriminators = {
     "usermotion1/upper": dict(
         # motion_file = "assets/motions/gym/front_jumping_jack.json",

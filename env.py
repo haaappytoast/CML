@@ -33,6 +33,18 @@ DiscriminatorProperty = namedtuple("DiscriminatorProperty",
     "name key_links parent_link local_pos local_height replay_speed ob_horizon id"
 )
 
+class SensorInputConfig(object):
+    def __init__(self,
+              rlh_localPos: Optional[str]=None,  
+              rlh_localRot: Optional[str]=None, 
+              xy_pressed: Optional[str]=None):
+        
+        self.rlh_localPos = rlh_localPos
+        self.rlh_localRot = rlh_localRot
+        self.xy_pressed = xy_pressed
+        
+SensorInputProperty = namedtuple("SensorInputProperty",
+    "name rlh_localPos rlh_localRot xy_pressed")
 
 class Env(object):
     UP_AXIS = 2
@@ -2147,11 +2159,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     HPOS_COEFF = 0.25
     HROT_COEFF = 0.25
     
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, 
+                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
+                 **kwargs):
         self.rpos_coeff = parse_kwarg(kwargs, "rhand_pos", self.RPOS_COEFF)
         self.lpos_coeff = parse_kwarg(kwargs, "lhand_pos", self.LPOS_COEFF)
         self.hpos_coeff = parse_kwarg(kwargs, "hmd_pos", self.HPOS_COEFF)
         self.hrot_coeff = parse_kwarg(kwargs, "hmd_rot", self.HROT_COEFF)
+        self.sensor_inputs = sensor_inputs
         super().__init__(*args, **kwargs)
 
     def step(self, actions):
@@ -2204,19 +2219,22 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.offset_time = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
         self.etime = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
 
-        #! heuristic
-        rlh_localPos = np.load(os.getcwd() + "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy")
+        # get file path of rlh localPos, Rot, xy_pressed
+        for name, sensorconfig in self.sensor_inputs.items():
+            print("\n=======\n", name, ": sensor input path well detected", "\n=======\n")
+        rlh_localPos = np.load(os.getcwd() + sensorconfig.rlh_localPos)
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
         
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
         #! Should this not be averaged?? 
         self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
         
-        rlh_localRot = np.load(os.getcwd() + "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy")
+        rlh_localRot = np.load(os.getcwd() + sensorconfig.rlh_localRot)
         rlh_localRot = torch.tensor(rlh_localRot, dtype=torch.float32, device=self.device)
         self.h_lrot = rlh_localRot[..., 8:12]
         # self.r_lrot, self.l_lrot, self.h_lrot = torch.mean(r_localRot, dim=0), torch.mean(l_localRot, dim=0), torch.mean(h_localRot, dim=0) #(3, )
-
+       
+        #! should add variables for x,y pressed!
 
     def create_tensors(self):
         super().create_tensors()
