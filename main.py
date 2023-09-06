@@ -482,7 +482,23 @@ if __name__ == "__main__":
         # reward_coeff = namedtuple('x', reward_coeff.keys())(*reward_coeff.values())
     else:
         reward_coeff = dict(dummy = None)       # HumanoidVR 말고는 필요없음
-        
+
+    if hasattr(config, "sensor_input"):
+        if settings.test:   # test 일 때는 testset 가져오기
+            sensor_input = \
+            {
+                name: env.SensorInputConfig(**prop)
+                for name, prop in config.sensor_input.items() if "test" in name
+            }
+        else:                # train 일 때는 trainset 가져오기
+            sensor_input = \
+            {
+                name: env.SensorInputConfig(**prop)
+                for name, prop in config.sensor_input.items() if "train" in name
+            }
+    else:
+        sensor_input = {"dummy": env.SensorInputConfig()}
+                
     if hasattr(config, "training_params"):
         TRAINING_PARAMS.update(config.training_params)
     if not TRAINING_PARAMS["save_interval"]:
@@ -495,6 +511,7 @@ if __name__ == "__main__":
             name: env.DiscriminatorConfig(**prop)
             for name, prop in config.discriminators.items()
         }
+
     else:
         discriminators = {"_/full": env.DiscriminatorConfig()}
     if hasattr(config, "env_cls"):
@@ -507,6 +524,7 @@ if __name__ == "__main__":
         control_mode=CONTROL_MODE,
         discriminators=discriminators,
         compute_device=settings.device, 
+        sensor_inputs=sensor_input,
         **config.env_params,
         **reward_coeff
     )
