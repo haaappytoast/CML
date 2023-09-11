@@ -2397,8 +2397,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
 
                 # motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
-                print("self.motion_times: ", self.motion_times)
-                print("motion_ids: ", self.lowerbody_goal_motion_ids)
                 _, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
                 link_tensor[..., key_links, :] = other_link_tensor[..., key_links, :]
                 for idx in key_links:
