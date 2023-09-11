@@ -2794,7 +2794,13 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.goal_tensor[env_ids,13] = self.root_pos[env_ids,0] + dx
             self.goal_tensor[env_ids,14] = self.root_pos[env_ids,1] + dy
 
-    def reward(self, goal_tensor=None, goal_timer=None):
+    def reset_envs(self, env_ids):
+        super().reset_envs(env_ids)
+        #! b/c reset goal in every steps!
+        # self.reset_goal(env_ids)
+        self.reset_leg_control_goal(env_ids)
+
+
     def reward(self):
         sensor_tensor = self.goal_tensor[:, :13]
         control_tensor = self.goal_tensor[:, 13:]
