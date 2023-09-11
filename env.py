@@ -2213,8 +2213,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
         self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
 
+        # goal_motion_ids and times for upper body
         self.goal_motion_ids = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.int32, device=self.device)
         self.goal_motion_times = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
+
+        # goal_motion_ids and times for lower body
+        self.lowerbody_goal_motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
 
         self.offset_time = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
         self.etime = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
@@ -2275,13 +2279,20 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             if "left" in discs[0].name:
                 l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
                 l_goal_offset_time = ref_motion.randomize_offset(len(env_ids))               # randomize_offset to init_env
-            else:
+            else:   # lower body
+                lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
+                
                 pass
-
+        
+        # upper body
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
         self.offset_time[env_ids, 0] = torch.tensor(up_goal_offset_time, dtype=torch.float32, device=self.device)
 
+        # lower body
+        self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
+
+        # left section of upper body
         if (l_goal_motion_ids != None):
             self.goal_motion_ids[env_ids, 1] = torch.tensor(l_goal_motion_ids, dtype=torch.int32, device=self.device)
             self.etime[env_ids, 1] = torch.tensor(l_goal_motion_etime, dtype=torch.float32, device=self.device)
@@ -2376,14 +2387,19 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                         
                         self.etime[reset, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
                         self.offset_time[reset, 0] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
-            
-            else:
+            # lower body discriminator
+            else:   
                 dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
                 # humanoid 시간 따로
                 self.motion_times = self.motion_times + dt_tensor
-                
-                motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
-                _, other_link_tensor, other_joint_tensor = ref_motion.state(motion_ids, self.motion_times.cpu().numpy())
+
+                #! goal_motion_ids는 lifetime이 다할 때마다 바꿔주기!
+                not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
+
+                # motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
+                print("self.motion_times: ", self.motion_times)
+                print("motion_ids: ", self.lowerbody_goal_motion_ids)
+                _, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
                 link_tensor[..., key_links, :] = other_link_tensor[..., key_links, :]
                 for idx in key_links:
                     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
@@ -2744,12 +2760,23 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         super().reset_goal(env_ids, self.goal_tensor)
         # self.reset_leg_control_goal(env_ids)
 
+    def reset_goal_motion_ids(self, env_ids):
+        #! code for only lower body discriminator 
+        for ref_motion, _, _, discs in self.disc_ref_motion:            
+            if "lower" in discs[0].name or "full" in discs[0].name:
+                lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
+                self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
+
+
     def overtime_check(self):
         if self.goal_timer is not None:
             self.goal_timer -= 1
             env_ids = torch.nonzero(self.goal_timer <= 0).view(-1)
             # print("self.goal_timer: ", self.goal_timer)
-            if len(env_ids) > 0: self.reset_leg_control_goal(env_ids)
+            if len(env_ids) > 0: 
+                self.reset_leg_control_goal(env_ids)
+                self.reset_goal_motion_ids(env_ids)
+
         if self.episode_length:
             if callable(self.episode_length):
                 return self.lifetime >= self.episode_length(self.simulation_step)
