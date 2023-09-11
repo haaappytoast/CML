@@ -2718,7 +2718,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
 class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_REWARD_WEIGHT = 0.25, 0.25
-    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4) + (3)
+    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4) + (3)   # rlh positions + h quats + root pos
     GOAL_DIM = 4 + 4 + 4                   # rhand, lhand root's (x, y, sp, dist)   #! should add head?!
 
     def create_motion_info(self):
@@ -2756,9 +2756,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             return self.lifetime >= self.episode_length
         return None
 
-    def reset_leg_control_goal(self, env_ids, goal_timer=None):
-        if goal_timer is None: goal_timer = self.goal_timer
-
+    def reset_leg_control_goal(self, env_ids):
         n_envs = len(env_ids)
         all_envs = n_envs == len(self.envs)
         root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
@@ -2787,22 +2785,21 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
 
         if all_envs:
             self.init_dist = dist
-            goal_timer.copy_(timer)
+            self.goal_timer.copy_(timer)
             self.goal_tensor[:,13] = self.root_pos[:,0] + dx
             self.goal_tensor[:,14] = self.root_pos[:,1] + dy
         else:
             self.init_dist[env_ids] = dist
-            goal_timer[env_ids] = timer
+            self.goal_timer[env_ids] = timer
             self.goal_tensor[env_ids,13] = self.root_pos[env_ids,0] + dx
             self.goal_tensor[env_ids,14] = self.root_pos[env_ids,1] + dy
 
     def reward(self, goal_tensor=None, goal_timer=None):
+    def reward(self):
         sensor_tensor = self.goal_tensor[:, :13]
-        sensor_rew = super().reward(sensor_tensor)
-
         control_tensor = self.goal_tensor[:, 13:]
-
-        if goal_timer is None: goal_timer = self.goal_timer
+        
+        sensor_rew = super().reward(sensor_tensor)
 
         p = self.root_pos                                       # 현재 root_pos
         p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
@@ -2810,7 +2807,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         dp_ = control_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
         dp_[:, self.UP_AXIS] = 0
         dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
-        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
+        v_ = dp_.div_(self.goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
 
         v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
         sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
