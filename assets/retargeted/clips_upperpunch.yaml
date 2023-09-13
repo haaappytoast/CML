@@ -1,0 +1,11 @@
+motions:
+- file: upperbody_punch/cml@m1_RRRRLLR.npy
+  weight: null
+- file: upperbody_punch/cml@m2_RRR.npy
+  weight: null
+- file: upperbody_punch/cml@m3_RLRL.npy
+  weight: null
+- file: upperbody_punch/cml@m4_LLLRL.npy
+  weight: null  
+- file: upperbody_punch/cml@m4_LLLRL.npy
+  weight: null  
