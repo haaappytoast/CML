@@ -1808,7 +1808,7 @@ class ICCGANHumanoidEE_ref(ICCGANHumanoidEE):
                     self.offset_time[still_motion, 0] -= 1
                     torch.clamp(self.offset_time[:, 0], min=0) 
                     # motion in still 그대로!
-                    print("self.goal_motion_times[still_motion, 0]: ", self.goal_motion_times[still_motion, 0])
+                    # print("self.goal_motion_times[still_motion, 0]: ", self.goal_motion_times[still_motion, 0])
                     self.goal_motion_times[still_motion, 0] = self.goal_motion_times[still_motion, 0]
                 # motion starts!
                 if len(move_motion):
@@ -2220,7 +2220,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # goal_motion_ids and times for lower body
         self.lowerbody_goal_motion_ids = torch.zeros(len(self.envs), dtype=torch.int32, device=self.device)
 
-        self.offset_time = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
         self.etime = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
 
         # get file path of rlh localPos, Rot, xy_pressed
@@ -2228,7 +2227,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             print("\n=======\n", name, ": sensor input path well detected", "\n=======\n")
         rlh_localPos = np.load(os.getcwd() + sensorconfig.rlh_localPos)
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
-        
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
         #! Should this not be averaged?? 
         self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
@@ -2274,11 +2272,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         for ref_motion, _, _, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
                 up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
-                up_goal_offset_time = ref_motion.randomize_offset(len(env_ids))               # randomize_offset to init_env
 
             if "left" in discs[0].name:
                 l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
-                l_goal_offset_time = ref_motion.randomize_offset(len(env_ids))               # randomize_offset to init_env
             else:   # lower body
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
                 
@@ -2287,7 +2283,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # upper body
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
-        self.offset_time[env_ids, 0] = torch.tensor(up_goal_offset_time, dtype=torch.float32, device=self.device)
 
         # lower body
         self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
@@ -2296,7 +2291,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         if (l_goal_motion_ids != None):
             self.goal_motion_ids[env_ids, 1] = torch.tensor(l_goal_motion_ids, dtype=torch.int32, device=self.device)
             self.etime[env_ids, 1] = torch.tensor(l_goal_motion_etime, dtype=torch.float32, device=self.device)
-            self.offset_time[env_ids, 1] = torch.tensor(l_goal_offset_time, dtype=torch.float32, device=self.device)
 
         # print("\n---------------INIT STATE: {}---------------\n".format(env_ids))
         
@@ -2353,7 +2347,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             key_links = discs[0].key_links
             if "upper" in discs[0].name or "full" in discs[0].name:
                 dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
-                motion_ids, _ = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
                 not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
 
                 if len(not_init_env_ids):
@@ -2362,7 +2355,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                     self.goal_motion_times[init_env_ids, 0] = self.goal_motion_times[init_env_ids, 0] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
             
                 motion_times0 = self.goal_motion_times[:, 0].cpu().numpy()
-                up_root_tensor, up_link_tensor, up_joint_tensor = ref_motion.state(motion_ids, motion_times0)
+                motion_ids0 = self.goal_motion_ids[:, 0].cpu().numpy()
+                up_root_tensor, up_link_tensor, up_joint_tensor = ref_motion.state(motion_ids0, motion_times0)
 
                 root_tensor[env_ids, 0] = up_root_tensor
                 link_tensor[..., key_links, :] = up_link_tensor[..., key_links, :]
@@ -2370,23 +2364,15 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
                     up_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
 
-                # self.goal_motion_times가 etime을 over 했을 때 
+                # self.goal_motion_times가 etime을 over 했을 때 --> 그 해당하는 env에 새로운 reference의 motion_ids, stime, etime 넣어주기!
                 over_etime = torch.nonzero(self.goal_motion_times[:, 0] - self.etime[:, 0] > 0.001).view(-1)
                 if len(over_etime):
-                    # over_time이면서 offset_time이 0 이하여야
-                    # still_motion = (self.offset_time[:, 1] == 0).nonzero().view(-1)
-                    # reset = getIntersection_Method1(over_etime, still_motion)
-                    reset = over_etime
-                    # print("reset: ", reset)
-                    if len(reset):
-                        goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(reset))
-                        goal_offset_time = ref_motion.randomize_offset(len(reset))               # randomize_offset to init_env
+                    goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(over_etime))
 
-                        self.goal_motion_ids[reset, 0] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
-                        self.goal_motion_times[reset, 0] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
-                        
-                        self.etime[reset, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
-                        self.offset_time[reset, 0] = torch.tensor(goal_offset_time, dtype=torch.float32, device=self.device)
+                    self.goal_motion_ids[over_etime, 0] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
+                    self.goal_motion_times[over_etime, 0] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
+
+                    self.etime[over_etime, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
             # lower body discriminator
             else:   
                 dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
@@ -2760,7 +2746,10 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
 
     def reset_goal_motion_ids(self, env_ids):
         #! code for only lower body discriminator 
-        for ref_motion, _, _, discs in self.disc_ref_motion:            
+        for ref_motion, _, _, discs in self.disc_ref_motion:        
+            if "upper" in discs[0].name in discs[0].name:
+                upper_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
+                self.goal_motion_ids[env_ids, 0] = torch.tensor(upper_goal_motion_ids, dtype=torch.int32, device=self.device)
             if "lower" in discs[0].name or "full" in discs[0].name:
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
                 self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
