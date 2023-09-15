@@ -2207,8 +2207,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
 class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_REWARD_WEIGHT = 0.25, 0.25
-    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4) + (3)   # rlh positions + h quats + root pos
-    GOAL_DIM = 4 + 4 + 4                   # rhand, lhand root's (x, y, sp, dist)   #! should add head?!
+    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4)    # rlh ggpositions + h ggquats
+    GOAL_DIM = 4 + 4 + 4                   # rhand, lhand, head's (x, y, sp, dist)
 
     def create_motion_info(self):
         super().create_motion_info()
