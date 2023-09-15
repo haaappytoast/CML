@@ -160,15 +160,17 @@ class ReferenceMotion():
         self.motion_dt = np.array(self.motion_dt)
         self.motion_n_frames = np.array(self.motion_n_frames)
 
-        print("Loaded {:d} motions with a total length of {:.3f}s.".format(len(self.motion), sum(self.motion_length)))
+        print("Loaded {:d} motions with a total length of {:.3f}s.".format(len(self.motion), sum(self.motion_length)), "\n")
 
     def to_tensor(self, x):
         return torch.tensor(x, dtype=torch.float, device=self.device, requires_grad=False)
 
-    def sample(self, n, truncate_time=None):
+    def sample(self, n, truncate_time=None, test=False):
         p = np.divide(self.motion_weight, sum(self.motion_weight))
         motion_ids = np.random.choice(len(self.motion), size=n, p=p, replace=True)
         phase = np.random.uniform(low=0.0, high=1.0, size=motion_ids.shape)
+        if test:
+            phase = np.random.uniform(low=0.0, high=0.0, size=motion_ids.shape)
         motion_len = self.motion_length[motion_ids]
         if (truncate_time is not None): motion_len -= truncate_time
         motion_time = phase * motion_len

@@ -2562,7 +2562,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! ADDED rcontrol reward
         target_ego_rhand_pos = goal_tensor[..., :3]
         rhand_pos = self.link_pos[:, self.r_hand_link]
-        rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos)
+        rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos)
         ego_rhand_pos = rcontrol_pos - origin
         ego_rhand_pos = rotatepoint(heading_orient_inv, ego_rhand_pos)          # N x 3
 
