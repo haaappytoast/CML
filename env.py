@@ -1880,6 +1880,24 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
 
+    def global_to_ego(root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
+        UP_AXIS = up_axis
+        origin = root_pos.clone()
+        origin[..., UP_AXIS] = 0
+        heading = heading_zup(root_orient)                                      # N
+        up_dir = torch.zeros_like(origin)                                       # N x 1 x 3
+        up_dir[..., UP_AXIS] = 1
+        heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
+        
+        if len(ee_pos.size()) == 3:
+            heading_orient_inv = heading_orient_inv.unsqueeze(-2).repeat(1, ee_pos.size(-2),1)
+            ego_ee_pos = ee_pos - origin.unsqueeze(-2)                             # [n_envs, n_ee_link, 3]
+        elif len(ee_pos.size()) == 2:
+            ego_ee_pos = ee_pos - origin                                           # [n_envs, 3]
+        # change x,y,z into root orient
+        ego_ee_pos = rotatepoint(heading_orient_inv, ego_ee_pos)       # [512, n_ee_link, 3] or [n_envs, 3]
+        return ego_ee_pos
+
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
 
@@ -1905,7 +1923,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.lifetime[env_ids] = 0
         #! b/c reset goal in every steps!
         # self.reset_goal(env_ids)
-            
+
+    #! goal tensors are all ego-centric     
     def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
         #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
         if goal_tensor is None: goal_tensor = self.goal_tensor
@@ -1914,27 +1933,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # reset하는 env 개수
         n_envs = len(env_ids)
         ee_links = [5, 8, 2]  # right hand, left hand, head
-        ee_pos = self.goal_link_pos[:, ee_links, :] # [n_envs, n_ee_link, 3]
+        ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
 
         all_envs = n_envs == len(self.envs)
-        def global_to_ego(root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
-            UP_AXIS = up_axis
-            origin = root_pos.clone()
-            origin[..., UP_AXIS] = 0
-            heading = heading_zup(root_orient)                                      # N
-            up_dir = torch.zeros_like(origin)                                       # N x 1 x 3
-            up_dir[..., UP_AXIS] = 1
-            heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
-            
-            if len(ee_pos.size()) == 3:
-                heading_orient_inv = heading_orient_inv.unsqueeze(-2).repeat(1, ee_pos.size(-2),1)
-                ego_ee_pos = ee_pos - origin.unsqueeze(-2)                             # [n_envs, n_ee_link, 3]
-            elif len(ee_pos.size()) == 2:
-                ego_ee_pos = ee_pos - origin                                           # [n_envs, 3]
-            # change x,y,z into root orient
-            ego_ee_pos = rotatepoint(heading_orient_inv, ego_ee_pos)       # [512, n_ee_link, 3] or [n_envs, 3]
-            return ego_ee_pos
+
         
         # ego-centric (ee_pos - origin)
         # rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], ee_pos[:, 0, :], 2)
@@ -1946,10 +1949,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
 
         #! need to change when l_goal_root_pos is used in three discriminators
-        rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], rcontrol_pos, 2)
-        # lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], lcontrol_pos, 2)
-        lhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], lcontrol_pos, 2)
-        hmd_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], hmd_pos, 2)
+        rhand_ego_ee_pos = self.global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], rcontrol_pos, 2)
+        lhand_ego_ee_pos = self.global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], lcontrol_pos, 2)
+        hmd_ego_ee_pos = self.global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], hmd_pos, 2)
 
         # rotation (#!300 should be changed with respect to the motion clip)
         hmd_lrot = self.h_lrot[self.lifetime % 300]                     # [num_envs, 4]
