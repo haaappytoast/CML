@@ -2451,6 +2451,99 @@ def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
     y = torch.where(too_close, y, y/dist)
     sp.clip_(max=sp_upper_bound)
     dist.div_(3).clip_(max=1.5)
-    #!
 
-    return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+    return torch.cat((x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+
+@torch.jit.script
+def observe_ubody_goal(state_hist: torch.Tensor,
+target_tensor: torch.Tensor, rlh_lpos: torch.Tensor):
+    root_pos = state_hist[-1, :, :3]            #  (1, NUM_ENVS, disc_obs) root global pos of last frame
+    root_orient = state_hist[-1, :, 3:7]        
+    
+    r_lpos, l_lpos, h_lpos = rlh_lpos[0], rlh_lpos[1], rlh_lpos[2]
+
+    # calculate root_heading
+    UP_AXIS = 2
+    origin = root_pos.clone()                                           # N x 3
+    origin[..., UP_AXIS] = 0     
+    heading = heading_zup(root_orient)                                  # N
+    up_dir = torch.zeros_like(origin)                                   # N x 3
+    up_dir[..., UP_AXIS] = 1
+    
+    heading_orient_inv = axang2quat(up_dir, -heading)                   # N x 4
+
+    #! rcontrol position difference w.r.t. root orient 
+    rhand_idx = 5
+    start_idx = 13 + rhand_idx*13
+    rhand_pos = state_hist[-1, :, start_idx:start_idx+3]
+    rhand_orient = state_hist[-1, :, start_idx+3:start_idx+7]
+    rcontrol_ggpos = rhand_pos + rotatepoint(rhand_orient, r_lpos)                  # [num_envs, 3] + (3, )
+
+    rcontrol_dp = target_tensor[..., :3] - rcontrol_ggpos                       # N x 3
+    
+    # change x,y,z into root orient
+    rcontrol_local_dp = rotatepoint(heading_orient_inv, rcontrol_dp)                                      # N x 3
+    local_rx, local_ry, local_rz = rcontrol_local_dp[:, 0], rcontrol_local_dp[:, 1], rcontrol_local_dp[:, 2]    # N
+
+    rcontrol_dist = (local_rx*local_rx + local_ry*local_ry + local_rz*local_rz).sqrt_()                      # N
+    #! end
+
+    #! lcontrol position difference w.r.t. root orient 
+    # 1. get lcontrol_dp (target_pos - left control pos of last frame)
+    lhand_idx = 8
+    lstart_idx = 13 + lhand_idx*13
+    lhand_pos = state_hist[-1, :, lstart_idx:lstart_idx+3]
+    lhand_orient = state_hist[-1, :, lstart_idx+3:lstart_idx+7]
+    lcontrol_ggpos = lhand_pos + rotatepoint(lhand_orient, l_lpos)                  # [num_envs, 3] + (3, )
+
+    lcontrol_dp = target_tensor[..., 3:6] - lcontrol_ggpos                       # N x 3
+
+    # 3. change x,y,z into root orient
+    lcontrol_local_dp = rotatepoint(heading_orient_inv, lcontrol_dp)                                      # N x 3
+    local_lx, local_ly, local_lz = lcontrol_local_dp[:, 0], lcontrol_local_dp[:, 1], lcontrol_local_dp[:, 2]    # N
+
+    lcontrol_dist = (local_lx*local_lx + local_ly*local_ly + local_lz*local_lz).sqrt_()                      # N
+    #! end
+    
+    #! hcontrol position difference w.r.t. root orient 
+    head_idx = 2
+    hstart_idx = 13 + head_idx*13
+    head_pos = state_hist[-1, :, hstart_idx:hstart_idx+3]
+    head_orient = state_hist[-1, :, hstart_idx+3:hstart_idx+7]
+    hcontrol_ggpos = head_pos + rotatepoint(head_orient, h_lpos)                  # [num_envs, 3] + (3, )
+    hcontrol_dp = target_tensor[..., 6:9] - hcontrol_ggpos                        # N x 3
+    
+    # 3. change x,y,z into root orient
+    hcontrol_local_dp = rotatepoint(heading_orient_inv, hcontrol_dp)                                      # N x 3
+    local_hx, local_hy, local_hz = hcontrol_local_dp[:, 0], hcontrol_local_dp[:, 1], hcontrol_local_dp[:, 2]    # N
+
+    hcontrol_dist = (local_hx*local_hx + local_hy*local_hy + local_hz*local_hz).sqrt_()                      # N
+
+    #! end
+    #! hcontrol orientation difference w.r.t. root orient 
+    hcontrol_grot = target_tensor[..., 9:13]                                      # [num_envs, 4]
+    diff_grot= quat_mul(quat_inverse(head_orient), hcontrol_grot)
+    local_hr = quat_mul(heading_orient_inv, diff_grot)
+    local_hr_tan_norm = utils.quat_to_tan_norm(local_hr)                          # [num_envs, 6]
+    #! end
+                    # (4 + 4 + 4 + 6)
+    ubodygoal_ob = torch.cat((local_rx.unsqueeze(-1), local_ry.unsqueeze(-1), local_rz.unsqueeze(-1), rcontrol_dist.unsqueeze(-1), 
+                    local_lx.unsqueeze(-1), local_ly.unsqueeze(-1), local_lz.unsqueeze(-1), lcontrol_dist.unsqueeze(-1),
+                    local_hx.unsqueeze(-1), local_hy.unsqueeze(-1), local_hz.unsqueeze(-1), hcontrol_dist.unsqueeze(-1),
+                    local_hr_tan_norm), -1)
+    return ubodygoal_ob
+
+@torch.jit.script
+def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
+    target_tensor: torch.Tensor, timer: torch.Tensor,
+    sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor
+):
+    
+    sensor_tensor = target_tensor[:, :13]
+    target_tensor = target_tensor[:, 13:16]
+
+    ob = observe_iccgan(state_hist, seq_len)
+    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos)                  # [env_ids, (4 + 4 + 4 + 6)]
+    root_ob = observe_root_goal(state_hist, target_tensor, timer, sp_upper_bound, fps)  # [env_ids, 4]
+
+    return torch.cat((ob, ubody_ob, root_ob), -1)
