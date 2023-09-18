@@ -2419,18 +2419,9 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
 
 @torch.jit.script
-def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
-    target_tensor: torch.Tensor, timer: torch.Tensor,
-    sp_upper_bound: float, fps: int
-):
-    sensor_tensor = target_tensor[:, :13]
-    target_tensor = target_tensor[:, 13:]
-
-    ob = observe_iccgan_ee(
-                state_hist, seq_len,
-                sensor_tensor, timer, sp_upper_bound, fps
-            )
-
+def observe_root_goal(state_hist: torch.Tensor,
+target_tensor: torch.Tensor, timer: torch.Tensor,
+sp_upper_bound: float, fps: int):
     #! root position 관련 항목
     root_pos = state_hist[-1, :, :3]
     root_orient = state_hist[-1, :, 3:7]
