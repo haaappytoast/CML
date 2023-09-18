@@ -1924,8 +1924,79 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! b/c reset goal in every steps!
         # self.reset_goal(env_ids)
 
-    #! goal tensors are all ego-centric     
+    #! goal tensors are all global     
     def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
+        if goal_tensor is None: goal_tensor = self.goal_tensor
+        if goal_timer is None: goal_timer = self.goal_timer
+        
+        # reset하는 env 개수
+        n_envs = len(env_ids)
+        ee_links = [5, 8, 2]  # right hand, left hand, head, 
+        ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
+        ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
+
+
+        #! control ggposition
+        rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        hmd_ggpos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
+
+        # rotation (#!300 should be changed with respect to the motion clip)
+        hmd_lrot = self.h_lrot[self.lifetime % 300]                     # [num_envs, 4]
+        hmd_ggrot = quat_mul(ee_rot[:, 2], hmd_lrot)                     # [num_envs, 4]
+
+        #! rcontrol global position
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0] = rcontrol_ggpos[:, 0]
+            goal_tensor[:, 1] = rcontrol_ggpos[:, 1]
+            goal_tensor[:, 2] = rcontrol_ggpos[:, 2]
+        else:
+            goal_tensor[env_ids, 0] = rcontrol_ggpos[:, 0]
+            goal_tensor[env_ids, 1] = rcontrol_ggpos[:, 1]
+            goal_tensor[env_ids, 2] = rcontrol_ggpos[:, 2]
+        #!
+
+        #! lcontrol global position
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0+3] = lcontrol_ggpos[:, 0]
+            goal_tensor[:, 1+3] = lcontrol_ggpos[:, 1]
+            goal_tensor[:, 2+3] = lcontrol_ggpos[:, 2]
+        else:
+            goal_tensor[env_ids, 0+3] = lcontrol_ggpos[:, 0]
+            goal_tensor[env_ids, 1+3] = lcontrol_ggpos[:, 1]
+            goal_tensor[env_ids, 2+3] = lcontrol_ggpos[:, 2]
+        #!
+
+        #! hmd global position
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0+6] = hmd_ggpos[:, 0]
+            goal_tensor[:, 1+6] = hmd_ggpos[:, 1]
+            goal_tensor[:, 2+6] = hmd_ggpos[:, 2]
+        else:
+            goal_tensor[env_ids, 0+6] = hmd_ggpos[:, 0]
+            goal_tensor[env_ids, 1+6] = hmd_ggpos[:, 1]
+            goal_tensor[env_ids, 2+6] = hmd_ggpos[:, 2]
+        #!
+
+        #! hmd global rotation
+        if n_envs == len(self.envs):
+            goal_tensor[:, 0+9] = hmd_ggrot[:, 0]
+            goal_tensor[:, 1+9] = hmd_ggrot[:, 1]
+            goal_tensor[:, 2+9] = hmd_ggrot[:, 2]
+            goal_tensor[:, 3+9] = hmd_ggrot[:, 3]
+        else:
+            goal_tensor[env_ids, 0+9] = hmd_ggrot[:, 0]
+            goal_tensor[env_ids, 1+9] = hmd_ggrot[:, 1]
+            goal_tensor[env_ids, 2+9] = hmd_ggrot[:, 2]
+            goal_tensor[env_ids, 3+9] = hmd_ggrot[:, 3]
+        #!        
+
+        #! root global position
+        # reset_leg_control_goal 에서 해줌
+        #!      
+
+    #! goal tensors are all ego-centric     
+    def reset_goal_ego(self, env_ids, goal_tensor=None, goal_timer=None):
         #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
@@ -1940,8 +2011,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         
         # ego-centric (ee_pos - origin)
-        # rhand_ego_ee_pos = global_to_ego(self.up_goal_root_pos[env_ids], self.up_goal_root_orient[env_ids], ee_pos[:, 0, :], 2)
-        # lhand_ego_ee_pos = global_to_ego(self.l_goal_root_pos[env_ids], self.l_goal_root_orient[env_ids], ee_pos[:, 1, :], 2)
         #! control egocentric position
         rcontrol_pos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
         lcontrol_pos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
@@ -2006,95 +2075,80 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def reward(self, goal_tensor=None, goal_timer=None):
         if goal_tensor is None: goal_tensor = self.goal_tensor
         if goal_timer is None: goal_timer = self.goal_timer
-
-        p = self.root_pos                                       # 현재 root_pos
-        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
-
-        dp_ = goal_tensor[..., :3] - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
-        dp_[:, self.UP_AXIS] = 0
-        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
-        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
-
-        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
-        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
-        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
-
-        dp = p - p_                                            # (현재 root - 이전 root)
-        dp[:, self.UP_AXIS] = 0
-        v = dp / self.step_time                                # current velocity: dp / duration 
-        r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
-
-        dp = goal_tensor[..., :3] - p
-        dp[:, self.UP_AXIS] = 0
-        dist = torch.linalg.norm(dp, ord=2, dim=-1)
-        self.near = dist < self.goal_radius
-
-        r[self.near] = 1
-        
-        if self.viewer is not None:
-            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
         
         rarm_len, larm_len = self.get_link_len([2,3,4], [3,4,5]), self.get_link_len([2,6,7], [6,7,8])
         rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
         rarm_len, larm_len = rarm_len.repeat(len(self.envs)), larm_len.repeat(len(self.envs))
 
-        #! ego-centric (ee_pos - origin)
+        ee_links = [5, 8, 2]  # right hand, left hand, head, 
+        ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
+        ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
+        
+        #! 1. rcontrol reward
+        # current rcontrol
+        rhand_pos = self.link_pos[:, self.r_hand_link]
+        rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos)  
+        ego_rcontrol_pos = self.global_to_ego(self.root_pos, self.root_orient, rcontrol_pos, 2)
+
+        # target_rcontrol_gpos (this goal_tensor is from previous lifetime goal_tensor) 
+        target_rcontrol_gpos = goal_tensor[..., :3]
+        ego_target_rcontrol_pos = self.global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
+
+        ## 
+        e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1).div_(rarm_len)
+        rcontrol_rew = e.mul_(-2).exp_()
+        #! 1. end
+
+        #! 2. lcontrol reward
+        # current lcontrol
+        lhand_pos = self.link_pos[:, self.l_hand_link]
+        lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos)
+        ego_lcontrol_pos = self.global_to_ego(self.root_pos, self.root_orient, lcontrol_pos, 2)
+
+        # target_lcontrol_gpos
+        target_lcontrol_gpos = goal_tensor[..., 3:6]
+        ego_target_lcontrol_pos = self.global_to_ego(ee_pos[:, 1, :], ee_rot[:, 1], target_lcontrol_gpos, 2)
+
+        l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1).div_(larm_len)
+        lcontrol_rew = l_e.mul_(-2).exp_()
+        #! 2. end
+
+        root_pos, root_orient = self.root_pos, self.root_orient
         UP_AXIS = 2
-        root_pos, root_orient = self.root_pos, self.root_orient                 # [n_envs, 3], [n_envs, 4]
         origin = root_pos.clone()
         origin[..., UP_AXIS] = 0
-        heading = heading_zup(root_orient)                                      # N
+        heading = heading_zup(root_orient)
         up_dir = torch.zeros_like(origin)                                       # N x 1 x 3
+
         up_dir[..., UP_AXIS] = 1
         heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
 
-        #! ADDED rcontrol reward
-        target_ego_rhand_pos = goal_tensor[..., :3]
-        rhand_pos = self.link_pos[:, self.r_hand_link]
-        rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos)
-        ego_rhand_pos = rcontrol_pos - origin
-        ego_rhand_pos = rotatepoint(heading_orient_inv, ego_rhand_pos)          # N x 3
+        #! 3. hmd POSITION reward
+        # current hmd pos
+        head_pos = self.link_pos[:, self.head]
+        hmd_pos = head_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos)
+        ego_hmd_pos = self.global_to_ego(self.root_pos, self.root_orient, hmd_pos, 2)
 
-        e = torch.linalg.norm(target_ego_rhand_pos.sub(ego_rhand_pos), ord=2, dim=-1).div_(rarm_len)
-        rhand_rew = e.mul_(-2).exp_()
-        #! ADDED rhand reward
+        # target_hmd_gpos
+        target_hmd_gpos = goal_tensor[..., 6:9]
+        ego_target_hmd_pos = self.global_to_ego(ee_pos[:, 2, :], ee_rot[:, 2], target_hmd_gpos, 2)
 
-        #! ADDED lcontrol reward
-        target_ego_lhand_pos = goal_tensor[..., 3:6]
-        lhand_pos = self.link_pos[:, self.l_hand_link]
-        lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos)
-        ego_lhand_pos = lcontrol_pos - origin
-        ego_lhand_pos = rotatepoint(heading_orient_inv, ego_lhand_pos)          # N x 3
+        hmd_e = torch.linalg.norm(ego_target_hmd_pos.sub(ego_hmd_pos), ord=2, dim=-1)
+        hmd_pos_e_rew = hmd_e.mul_(-3).exp_()
+        #! 3. end
 
-        l_e = torch.linalg.norm(target_ego_lhand_pos.sub(ego_lhand_pos), ord=2, dim=-1).div_(larm_len)
-        lhand_rew = l_e.mul_(-2).exp_()
-        #! ADDED lhand reward
-
-        #! ADDED hmd POSITION reward
-        target_ego_hmd_pos = goal_tensor[..., 6:9]
-        hmd_pos = self.link_pos[:, self.head]
-        hmd_pos = hmd_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos)
-        ego_hmd_lpos = hmd_pos - origin
-        ego_hmd_lpos = rotatepoint(heading_orient_inv, ego_hmd_lpos)          # N x 3
-
-        hmd_e = torch.linalg.norm(target_ego_hmd_pos.sub(ego_hmd_lpos), ord=2, dim=-1)
-        hmd_e_rew = hmd_e.mul_(-3).exp_()
-        #! ADDED hmd POSITION reward
-
-        #! ADDED hmd ORIENTATION reward
-        target_g_hmd_rot = goal_tensor[..., 9:13]
+        #! 4. hmd ORIENTATION reward
+        target_hmd_grot = goal_tensor[..., 9:13]
         head_rot = self.link_orient[:, self.head]
-        diff_grot= quat_mul(quat_inverse(head_rot), target_g_hmd_rot)
+        diff_grot= quat_mul(quat_inverse(head_rot), target_hmd_grot)
         ego_diffrot = quat_mul(heading_orient_inv, diff_grot)
 
         hmd_rot_e = torch.linalg.norm(ego_diffrot, ord=2, dim=-1)
         hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
-        #! ADDED hmd ORIENTATION reward
+        #! 4. end
 
-        # print("rhand_rew: ", torch.mean(rhand_rew, dim=0).item(), "lhand_rew: ",  torch.mean(lhand_rew, dim=0).item(), \
-        #       "hmd_e_rew: ", torch.mean(hmd_e_rew, dim=0).item(), "hmd_rot_e_rew: ", torch.mean(hmd_rot_e_rew, dim=0).item(),)
-        total_r = (self.rpos_coeff * rhand_rew + self.lpos_coeff * lhand_rew \
-                    + self.hpos_coeff * hmd_e_rew + self.hrot_coeff * hmd_rot_e_rew)       
+        total_r = (self.rpos_coeff * rcontrol_rew + self.lpos_coeff * lcontrol_rew \
+                    + self.hpos_coeff * hmd_pos_e_rew + self.hrot_coeff * hmd_rot_e_rew)       
         return total_r.unsqueeze_(-1)
     
     def visualize_origin(self):
@@ -2207,8 +2261,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
 class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_REWARD_WEIGHT = 0.25, 0.25
-    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4)    # rlh ggpositions + h ggquats
-    GOAL_DIM = 4 + 4 + 4                   # rhand, lhand, head's (x, y, sp, dist)
+    GOAL_TENSOR_DIM = (3 + 3 + 3) + (4) + (3)    # rlh ggpositions + h ggquats + root_pos
+    GOAL_DIM = 4 + 4 + 4 + 6 + 4                   # rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 
     def create_motion_info(self):
         super().create_motion_info()
@@ -2221,17 +2275,15 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         if env_ids is None:
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
-                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
+                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps, rlh_lpos = self.rlh_lpos
             )
         else:
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
-                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
+                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps, rlh_lpos = self.rlh_lpos
             )
-        
-    def reset_goal(self, env_ids):
-        super().reset_goal(env_ids, self.goal_tensor)
-        # self.reset_leg_control_goal(env_ids)
+
+  
 
     def reset_goal_motion_ids(self, env_ids):
         #! code for only lower body discriminator 
@@ -2242,7 +2294,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             if "lower" in discs[0].name or "full" in discs[0].name:
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
                 self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
-
 
     def overtime_check(self):
         if self.goal_timer is not None:
@@ -2302,7 +2353,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         #! b/c reset goal in every steps!
         # self.reset_goal(env_ids)
         self.reset_leg_control_goal(env_ids)
-
 
     def reward(self):
         sensor_tensor = self.goal_tensor[:, :13]
