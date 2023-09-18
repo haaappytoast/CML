@@ -1630,9 +1630,6 @@ def observe_iccgan_ee(state_hist: torch.Tensor, seq_len: torch.Tensor,
     lhand_dist = (local_l_x*local_l_x + local_l_y*local_l_y + local_l_z*local_l_z).sqrt_()                      # N
     #! ADDED lhand reward
 
-
-    #! what I added
-    # return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
     return torch.cat((ob, local_x.unsqueeze_(-1), local_y.unsqueeze_(-1), local_z.unsqueeze_(-1), rhand_dist.unsqueeze_(-1), 
                     local_l_x.unsqueeze_(-1), local_l_y.unsqueeze_(-1), local_l_z.unsqueeze_(-1), lhand_dist.unsqueeze_(-1)), -1)
 
@@ -1716,12 +1713,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32, device=self.device)
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
         #! Should this not be averaged?? 
-        self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0) #(3, )
-        
+        self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0)     #(3, )
+        self.rlh_lpos = torch.cat((self.r_lpos.unsqueeze(0), self.l_lpos.unsqueeze(0), self.h_lpos.unsqueeze(0)), 0)
+
         rlh_localRot = np.load(os.getcwd() + sensorconfig.rlh_localRot)
         rlh_localRot = torch.tensor(rlh_localRot, dtype=torch.float32, device=self.device)
         self.h_lrot = rlh_localRot[..., 8:12]
-        # self.r_lrot, self.l_lrot, self.h_lrot = torch.mean(r_localRot, dim=0), torch.mean(l_localRot, dim=0), torch.mean(h_localRot, dim=0) #(3, )
+        # self.r_lrot, self.l_lrot, self.h_lrot = torch.mean(r_localRot, dim=0), torch.mean(l_localRot, dim=0), torch.mean(h_localRot, dim=0)   #(3, )
        
         #! should add variables for x,y pressed!
 
@@ -1876,11 +1874,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
                     other_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
 
+        # 현재 goal_link_tensor
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
 
-    def global_to_ego(root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
+
+    def global_to_ego(self, root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
         UP_AXIS = up_axis
         origin = root_pos.clone()
         origin[..., UP_AXIS] = 0
