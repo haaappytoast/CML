@@ -1637,6 +1637,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     RANDOM_INIT = True
     EE_SIZE = 2
     GOAL_TENSOR_DIM = 3 + 3 + 3 + 4                 # global position of right/left hand / head controller target (X, Y, Z) - where they should reach
+    GOAL_DIM = 4 + 4 + 4 + 6                        # rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 
     RPOS_COEFF = 0.25
     LPOS_COEFF = 0.25
@@ -1786,16 +1787,16 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
     def _observe(self, env_ids):
         if env_ids is None:
-            return observe_iccgan_ee(
+            return observe_iccgan_vr(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
-                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
+                self.goal_tensor, rlh_lpos = self.rlh_lpos
             )
         else:
-            return observe_iccgan_ee(
+            return observe_iccgan_vr(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
-                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
+                self.goal_tensor[env_ids], rlh_lpos = self.rlh_lpos
             )
-        
+
     def update_viewer(self):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
@@ -2523,6 +2524,15 @@ target_tensor: torch.Tensor, rlh_lpos: torch.Tensor):
                     local_hx.unsqueeze(-1), local_hy.unsqueeze(-1), local_hz.unsqueeze(-1), hcontrol_dist.unsqueeze(-1),
                     local_hr_tan_norm), -1)
     return ubodygoal_ob
+
+@torch.jit.script
+def observe_iccgan_vr(state_hist: torch.Tensor, seq_len: torch.Tensor,
+    target_tensor: torch.Tensor, rlh_lpos: torch.Tensor
+):
+    sensor_tensor = target_tensor[:, :13]
+    ob = observe_iccgan(state_hist, seq_len)
+    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos)                  # [env_ids, (4 + 4 + 4 + 6)]
+    return torch.cat((ob, ubody_ob), -1)
 
 @torch.jit.script
 def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
