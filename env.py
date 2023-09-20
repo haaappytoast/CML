@@ -2000,7 +2000,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
 
-
         #! control ggposition
         rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
         lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
@@ -2589,7 +2588,7 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
     root_pos = state_hist[-1, :, :3]            #  (1, NUM_ENVS, disc_obs) root global pos of last frame
     root_orient = state_hist[-1, :, 3:7]        
     
-    r_lpos, l_lpos, h_lpos = rlh_lpos[0], rlh_lpos[1], rlh_lpos[2]
+    r_lpos, l_lpos, h_lpos = rlh_lpos[0].to(device=state_hist.device), rlh_lpos[1].to(device=state_hist.device), rlh_lpos[2].to(device=state_hist.device)
 
     # calculate root_heading
     UP_AXIS = 2
@@ -2604,7 +2603,6 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
     #! rcontrol position difference w.r.t. root orient
     #  
     ubodygoal_ob = torch.empty((0, state_hist.size(1)), dtype=torch.float32).to(device=state_hist.device)
-    print(ubodygoal_ob.size(0))
     if ((rlh_coeffs[0])):
         rhand_idx = 5
         start_idx = 13 + rhand_idx*13
