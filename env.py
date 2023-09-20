@@ -208,6 +208,12 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_F, "TOGGLE_CAMERA_FOLLOWING")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "TOGGLE_PAUSE")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_D, "SINGLE_STEP_ADVANCE")
+
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_0, "UpperBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "LowerBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "FullBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "Default")
+
     
     def update_viewer(self):
         self.gym.poll_viewer_events(self.viewer)
@@ -220,6 +226,16 @@ class Env(object):
                 self.viewer_pause = not self.viewer_pause
             if event.action == "SINGLE_STEP_ADVANCE" and event.value > 0:
                 self.viewer_advance = not self.viewer_advance
+
+            if event.action == "UpperBody" and event.value > 0:
+                self.upper, self.lower, self.full = True, False, False
+            if event.action == "LowerBody" and event.value > 0:
+                self.upper, self.lower, self.full = False, True, False
+            if event.action == "FullBody" and event.value > 0:
+                self.upper, self.lower, self.full = False, False, True
+            if event.action == "Default" and event.value > 0:
+                self.upper, self.lower, self.full = False, False, False
+
         if self.camera_following: self.update_camera()
         self.gym.step_graphics(self.sim)
 
@@ -1652,6 +1668,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.hpos_coeff = parse_kwarg(kwargs, "hmd_pos", self.HPOS_COEFF)
         self.hrot_coeff = parse_kwarg(kwargs, "hmd_rot", self.HROT_COEFF)
         self.sensor_inputs = sensor_inputs
+        self.upper, self.lower, self.full = False, False, False
+
         super().__init__(*args, **kwargs)
 
     def step(self, actions):
@@ -1660,14 +1678,31 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         env_ids = list(range(len(self.envs)))
         self.reset_goal(env_ids)
 
+
         # check overtime of goal_motion_time
         if self.viewer is not None: 
             up_over_env_ids, up_in_env_ids, up_key_links, l_over_env_ids, l_in_env_ids, l_key_links = self.goal_motion_overtime_check()
-            self.set_char_color([0.0, 0.0, 0.0], up_over_env_ids, up_key_links)
-            self.set_char_color((1, 1, 0.5), up_in_env_ids, up_key_links)
-            self.set_char_color([0.0, 0.0, 0.0], l_over_env_ids, l_key_links)
-            self.set_char_color((1, 0.5, 1), l_in_env_ids, l_key_links)
-            
+            # self.set_char_color([0.0, 0.0, 0.0], up_over_env_ids, up_key_links)
+            # self.set_char_color((1, 1, 0.5), up_in_env_ids, up_key_links)
+            # self.set_char_color([0.0, 0.0, 0.0], l_over_env_ids, l_key_links)
+            # self.set_char_color((1, 0.5, 1), l_in_env_ids, l_key_links)
+
+            if (self.upper):    
+                self.set_char_color([0.0, 0.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)
+            elif (self.lower):
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([0.0, 1.0, 0.0], env_ids, l_key_links)
+
+            elif (self.full):
+                self.set_char_color([0.0, 0.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([0.0, 1.0, 0.0], env_ids, l_key_links)
+            else:
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)
+
+
+
         obs, rews, dones, info = super().step(actions)
         return obs, rews, dones, info
     
