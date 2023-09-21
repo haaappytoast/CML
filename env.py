@@ -2156,10 +2156,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         rarm_len, larm_len = rarm_len.sum(dim=0), larm_len.sum(dim=0)
         rarm_len, larm_len = rarm_len.repeat(len(self.envs)), larm_len.repeat(len(self.envs))
 
-        ee_links = [5, 8, 2]  # right hand, left hand, head, 
-        ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
-        ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
-        
+        target_root_pos = self.goal_root_tensor[:, 0, :3]
+        taret_root_rot = self.goal_root_tensor[:, 0, 3:7]   # [num_envs, 3, 4]
+
         rcontrol_rew, lcontrol_rew, hmd_pos_e_rew, hmd_rot_e_rew = \
             torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device)
 
@@ -2172,9 +2171,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             # target_rcontrol_gpos (this goal_tensor is from previous lifetime goal_tensor) 
             target_rcontrol_gpos = goal_tensor[..., :3]
-            ego_target_rcontrol_pos = self.global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
+            # ego_target_rcontrol_pos = self.global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
+            ego_target_rcontrol_pos = self.global_to_ego(target_root_pos, taret_root_rot, target_rcontrol_gpos, 2)
 
-            ## 
             e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1).div_(rarm_len)
             rcontrol_rew = e.mul_(-2).exp_()
         #! 1. end
@@ -2189,7 +2188,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             # target_lcontrol_gpos
             start_idx = int(self.rlh_coeffs[0]) * 3
             target_lcontrol_gpos = goal_tensor[..., start_idx + 0 : start_idx + 3]
-            ego_target_lcontrol_pos = self.global_to_ego(ee_pos[:, 1, :], ee_rot[:, 1], target_lcontrol_gpos, 2)
+            ego_target_lcontrol_pos = self.global_to_ego(target_root_pos, taret_root_rot, target_lcontrol_gpos, 2)
 
             l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1).div_(larm_len)
             lcontrol_rew = l_e.mul_(-2).exp_()
@@ -2216,7 +2215,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             # target_hmd_gpos
             target_hmd_gpos = goal_tensor[..., start_idx + 0 : start_idx + 3]
-            ego_target_hmd_pos = self.global_to_ego(ee_pos[:, 2, :], ee_rot[:, 2], target_hmd_gpos, 2)
+            ego_target_hmd_pos = self.global_to_ego(target_root_pos, taret_root_rot, target_hmd_gpos, 2)
 
             hmd_e = torch.linalg.norm(ego_target_hmd_pos.sub(ego_hmd_pos), ord=2, dim=-1)
             hmd_pos_e_rew = hmd_e.mul_(-3).exp_()
