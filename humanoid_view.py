@@ -385,7 +385,7 @@ import numpy as np
 
 class ICCGANHumanoid(Env):
 
-    CHARACTER_MODEL = "assets/humanoid.xml"
+    CHARACTER_MODEL = "assets/new_cml.xml"
     CONTROLLABLE_LINKS = ["torso", "head", 
         "right_upper_arm", "right_lower_arm",
         "left_upper_arm", "left_lower_arm", 
