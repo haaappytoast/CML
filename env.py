@@ -1773,6 +1773,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
         self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
 
+        self.lbody_goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device) # [n_envs, 2, 13]
+        
         # goal_motion_ids and times for upper body
         self.goal_motion_ids = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.int32, device=self.device)
         self.goal_motion_times = torch.zeros([len(self.envs), self.EE_SIZE], dtype=torch.float32, device=self.device)
@@ -1864,10 +1866,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
-        self.visualize_goal_positions()
-        self.visualize_control_positions(isRef=True)
-        self.visualize_control_positions(isRef=False)
-        self.visualize_hmd_rotations()
+        self.visualize_goal_positions_wrt_curr()
+        
+        # self.visualize_goal_positions()
+        # self.visualize_control_positions(isRef=True)
+        # self.visualize_control_positions(isRef=False)
+        # self.visualize_hmd_rotations()
+        
         # self.visualize_origin()
         # self.visualize_ego_ee()
     
@@ -1933,7 +1938,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
 
                 # motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
-                _, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
+                other_root_tensor, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
                 link_tensor[..., key_links, :] = other_link_tensor[..., key_links, :]
                 for idx in key_links:
                     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
@@ -1943,7 +1948,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
         self.goal_joint_tensor[env_ids] = joint_tensor
-
+        
+        self.lbody_goal_root_tensor[env_ids] = other_root_tensor
 
     def global_to_ego(self, root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
         UP_AXIS = up_axis
@@ -1959,6 +1965,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ego_ee_pos = ee_pos - origin.unsqueeze(-2)                             # [n_envs, n_ee_link, 3]
         elif len(ee_pos.size()) == 2:
             ego_ee_pos = ee_pos - origin                                           # [n_envs, 3]
+        else:
+            ego_ee_pos = ee_pos - origin                                           # [3]
         # change x,y,z into root orient
         ego_ee_pos = rotatepoint(heading_orient_inv, ego_ee_pos)       # [512, n_ee_link, 3] or [n_envs, 3]
         return ego_ee_pos
@@ -2316,37 +2324,130 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         hmd_lrot = self.h_lrot[self.lifetime % 300].unsqueeze(dim=-2)
         hmd_grot = quat_mul(self.link_orient[:, [2], :], hmd_lrot.to(self.device))   # [num_envs, frame_num, 4]
         self.visualize_axis(hmd_position, hmd_grot, scale = 0.2, y=0.2, z =0.2)  # orientation: [num_envs, 1, 4]
+    
+    def visualize_goal_positions_wrt_curr(self):
+        up_ee_links = [3, 4, 5]
+        l_key_links = [6, 7, 8]
+        pelvis_key_links = [1, 2]
+        lower_key_links = [9, 10, 11, 12, 13, 14]
+
+        lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 0.3))       # pink
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # yellow
+        rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))    # pink
+        ee_pos = self.goal_link_pos
+        ee_rot = self.goal_link_orient
+
+        
+        goal_root_pos = self.goal_root_tensor[:, 0, :3]
+        goal_root_rot = self.goal_root_tensor[:, 0, 3:7]   # [num_envs, 3, 4]
+        
+        hmd_pos      = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))
+        rcontrol_pos = ee_pos[:, 5] + rotatepoint(ee_rot[:, 5], self.r_lpos.to(self.device))
+        lcontrol_pos = ee_pos[:, 8] + rotatepoint(ee_rot[:, 8], self.l_lpos.to(self.device))
+
+        ego_hmd_pos = self.global_to_ego(goal_root_pos, goal_root_rot, hmd_pos, 2)  # [num_envs, 3]
+        ego_rcontrol_pos = self.global_to_ego(goal_root_pos, goal_root_rot, rcontrol_pos, 2)  # [num_envs, 3]
+        ego_lcontrol_pos = self.global_to_ego(goal_root_pos, goal_root_rot, lcontrol_pos, 2)  # [num_envs, 3]
+        
+        root_pos = torch.zeros_like(self.root_pos)
+        root_pos[:, 0], root_pos[:, 1], root_pos[:, 2] = self.root_pos[:, 0], self.root_pos[:, 1], self.root_pos[:, 2]
+        
+        for i in range(len(self.envs)):
+            UP_AXIS = 2
+            # origin = root_pos[i]
+            # origin[..., UP_AXIS] = 0            
+            heading = heading_zup(self.root_orient[i])
+            up_dir = torch.zeros_like(root_pos[i])                                       # N x 1 x 3
+            up_dir[..., UP_AXIS] = 1
+            heading_orient = axang2quat(up_dir, heading)                       # N x 4
+            heading_orient.unsqueeze_(0)
+
+            glob_hmd_pos = rotatepoint(heading_orient, ego_hmd_pos)
+            glob_rcontrol_pos = rotatepoint(heading_orient, ego_rcontrol_pos)
+            glob_lcontrol_pos = rotatepoint(heading_orient, ego_lcontrol_pos)
+
+            # 지금 character가 향하고 있는 방향에 대해서 (offset, 0, 0) 만큼 떨어져서 visualize 되도록
+            offset = -0.7
+            offset_vec = torch.tensor([0, offset, 0], dtype=torch.float32, device=self.device)
+            ego_offset_vec = rotatepoint(heading_orient, offset_vec)
+
+            hmd_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_hmd_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_hmd_pos[i, 1], ego_offset_vec[i, 2] + glob_hmd_pos[i, 2]), r=None)
+            rcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_rcontrol_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_rcontrol_pos[i, 1], ego_offset_vec[i, 2] + glob_rcontrol_pos[i, 2]), r=None)
+            lcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_lcontrol_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_lcontrol_pos[i, 1], ego_offset_vec[i, 2] + glob_lcontrol_pos[i, 2]), r=None) 
+            control_geom = gymutil.WireframeSphereGeometry(0.03, 16, 16, None, color=(1, 1, 0))   # black
+
+            gymutil.draw_lines(control_geom, self.gym, self.viewer, self.envs[i], hmd_pos)
+            gymutil.draw_lines(control_geom, self.gym, self.viewer, self.envs[i], rcontrol_pos)
+            gymutil.draw_lines(control_geom, self.gym, self.viewer, self.envs[i], lcontrol_pos)
+
+            # 오른쪽 팔
+            for link in up_ee_links:
+                link_pos = ee_pos[i, link]
+                ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  # [num_envs, 3]
+                glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
+
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white 
+            
+            # 왼쪽 팔
+            for link in l_key_links:
+                link_pos = ee_pos[i, link]
+                ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  
+                glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
+                
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
+
+            # torso, pelvis
+            for link in pelvis_key_links:
+                link_pos = ee_pos[i, link]
+                ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  
+                glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
+                
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
+            
+            # lower body
+            for link in lower_key_links:
+                link_pos = ee_pos[i, link]
+                ego_link_pos = self.global_to_ego(self.lbody_goal_root_tensor[:, 0, :3], self.lbody_goal_root_tensor[:, 0, 3:7], link_pos, 2)  
+                glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
+                
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
+
 
     def visualize_goal_positions(self):
         up_ee_links = [3, 4, 5]
         l_key_links = [6, 7, 8]
-        lower_key_links = [0, 1, 2, 9, 10, 11, 12, 13, 14]
+        lower_key_links = [1, 2]
 
         lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 0.3))       # pink
-        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 0.3))       # yellow
+        rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # yellow
         rootsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0.3, 1, 1))    # pink
         ee_pos = self.goal_link_pos
 
+        goal_root_pos = self.goal_root_tensor[:, 0, :3]
         root_pos = torch.zeros_like(self.root_pos)
         root_pos[:, 0], root_pos[:, 1], root_pos[:, 2] = self.root_pos[:, 0], self.root_pos[:, 1], self.root_pos[:, 2]
         
         for i in range(len(self.envs)):
             for link in up_ee_links:
-                link_pos = ee_pos[i, link]
-                link_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + link_pos[0], root_pos[i, 1] + link_pos[1], link_pos[2]), r=None)
+                link_pos = ee_pos[i, link] - goal_root_pos[i]
+                link_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + link_pos[0], root_pos[i, 1] + link_pos[1], root_pos[i, 2] + link_pos[2]), r=None)
                 gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white 
                 # link_pose = gymapi.Transform(gymapi.Vec3(link_pos[0], link_pos[1], link_pos[2]), r=None)
                 # gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white                 
             for link in l_key_links:
-                link_pos = ee_pos[i, link]
-                link_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + link_pos[0], root_pos[i, 1] + link_pos[1], link_pos[2]), r=None)
+                link_pos = ee_pos[i, link] - goal_root_pos[i]
+                link_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + link_pos[0], root_pos[i, 1] + link_pos[1], root_pos[i, 2] + link_pos[2]), r=None)
                 gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
                 # link_pose = gymapi.Transform(gymapi.Vec3(link_pos[0], link_pos[1], link_pos[2]), r=None)
                 # gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
             for link in lower_key_links:
-                link_pos = ee_pos[i, link]
-                # link_pose = gymapi.Transform(gymapi.Vec3(link_pos[0], link_pos[1], link_pos[2]), r=None)
-                # gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
+                link_pos = ee_pos[i, link] - goal_root_pos[i]
+                link_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + link_pos[0], root_pos[i, 1] + link_pos[1], root_pos[i, 2] + link_pos[2]), r=None)
+                gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
 
     def visualize_ego_ee(self):
         lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0.3, 1))       # pink
