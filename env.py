@@ -2291,15 +2291,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ee_pos = self.goal_link_pos[:, ee_links, :]      # [num_envs, 3, ee_links]
             ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
             sphere_geom = gymutil.WireframeSphereGeometry(0.03, 16, 16, None, color=(1, 1, 0))   # black
+            goal_root_pos = self.goal_root_tensor[:, 0, :3]
         else:
             ee_rot = self.link_orient[:, ee_links, :]   # [num_envs, 3, 4]
             ee_pos = self.link_pos[:, ee_links, :]
             sphere_geom = gymutil.WireframeSphereGeometry(0.03, 16, 16, None, color=(0, 0.5, 0.5))   # green
 
-
-
         root_pos = torch.zeros_like(self.root_pos)
-        root_pos[:, 0], root_pos[:, 1] = self.root_pos[:, 0], self.root_pos[:, 1]
+        root_pos[:, 0], root_pos[:, 1], root_pos[:, 2] = self.root_pos[:, 0], self.root_pos[:, 1], self.root_pos[:, 2]
 
         for i in range(len(self.envs)):
             hmd_pos      = ee_pos[i, 0] + rotatepoint(ee_rot[i, 0], self.h_lpos.to(self.device))
@@ -2307,9 +2306,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             lcontrol_pos = ee_pos[i, 2] + rotatepoint(ee_rot[i, 2], self.l_lpos.to(self.device))
 
             if isRef:
-                hmd_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + hmd_pos[0], root_pos[i, 1] + hmd_pos[1], hmd_pos[2]), r=None)
-                rcontrol_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + rcontrol_pos[0], root_pos[i, 1] + rcontrol_pos[1], rcontrol_pos[2]), r=None)
-                lcontrol_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + lcontrol_pos[0], root_pos[i, 1] + lcontrol_pos[1], lcontrol_pos[2]), r=None)
+                hmd_pos      = hmd_pos      - goal_root_pos[i]
+                rcontrol_pos = rcontrol_pos - goal_root_pos[i]
+                lcontrol_pos = lcontrol_pos - goal_root_pos[i]
+                hmd_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + hmd_pos[0], root_pos[i, 1] + hmd_pos[1],  root_pos[i, 2] + hmd_pos[2]), r=None)
+                rcontrol_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + rcontrol_pos[0], root_pos[i, 1] + rcontrol_pos[1],  root_pos[i, 2] + rcontrol_pos[2]), r=None)
+                lcontrol_pose = gymapi.Transform(gymapi.Vec3(root_pos[i, 0] + lcontrol_pos[0], root_pos[i, 1] + lcontrol_pos[1],  root_pos[i, 2] + lcontrol_pos[2]), r=None)
             else:
                 hmd_pose = gymapi.Transform(gymapi.Vec3(hmd_pos[0], hmd_pos[1], hmd_pos[2]), r=None)
                 rcontrol_pose = gymapi.Transform(gymapi.Vec3(rcontrol_pos[0], rcontrol_pos[1], rcontrol_pos[2]), r=None)
