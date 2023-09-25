@@ -1,0 +1,11 @@
+motions:
+- file: 0925/cml@m1.npy
+  weight: null
+- file: 0925/cml@m2.npy
+  weight: null
+- file: 0925/cml@m3.npy
+  weight: null
+- file: 0925/cml@m4.npy
+  weight: null  
+- file: 0925/cml@m5.npy
+  weight: null  
