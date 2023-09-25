@@ -21,10 +21,10 @@ training_params = dict(
 )
 
 reward_coeff = dict(
-    rhand_pos = 1,      # 3
-    lhand_pos = 0,      # 3
-    hmd_pos = 0,        # 3
-    hmd_rot = 0      # 4
+    rhand_pos = 0.35,      # 3
+    lhand_pos = 0.35,      # 3
+    hmd_pos = 0.2,        # 3
+    hmd_rot = 0.1      # 4
 )
 
 sensor_input = { 
@@ -42,7 +42,7 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/clips_upperpunch.yaml",
+        motion_file = "assets/retargeted/0925_punch.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
