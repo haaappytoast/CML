@@ -2552,6 +2552,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
 
         change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
         
+        # global
         tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
         
         if self.goal_sp_min == self.goal_sp_max:
@@ -2586,7 +2587,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         super().reset_envs(env_ids)
         #! b/c reset goal in every steps!
         # self.reset_goal(env_ids)
-        print("\n\n -------reset leg control goal!----- \n\n")
         self.reset_leg_control_goal(env_ids)
         pass
 
@@ -2603,7 +2603,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         root_pos = self.root_pos                                       # 현재 root_pos
         root_rot = self.root_orient
         root_pos_prev = self.state_hist[-1][:, :3]                     # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
-        _print = True
+        _print=False
         heading_rew = compute_heading_reward(root_pos, root_pos_prev, root_rot, heading_tensor, self.fps, _print, self.heading_coeff)
 
         r = torch.cat((sensor_rew, heading_rew.unsqueeze_(-1)), -1)
@@ -2617,16 +2617,16 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
         tar_dir = self.goal_tensor[:, start_idx:start_idx+2]
         tar_dir = torch.cat((tar_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
-        # local2global: global_tar_dir
-        UP_AXIS = 2
-        heading = heading_zup(self.root_orient)     # (num_envs, ) angle
-        up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
-        up_dir[..., UP_AXIS] = 1
-        heading_rot = axang2quat(up_dir, heading)                                            # N x 4
-        g_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
+        # # local2global: global_tar_dir
+        # UP_AXIS = 2
+        # heading = heading_zup(self.root_orient)     # (num_envs, ) angle
+        # up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
+        # up_dir[..., UP_AXIS] = 1
+        # heading_rot = axang2quat(up_dir, heading)                                            # N x 4
+        # g_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
 
-        tar_x = g_tar_dir[..., 0]
-        tar_y = g_tar_dir[..., 1]
+        tar_x = tar_dir[..., 0].cpu().numpy()
+        tar_y = tar_dir[..., 1].cpu().numpy()
         
         tar_sp = self.goal_tensor[:, -1].cpu().numpy()
 
@@ -2655,23 +2655,13 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
     delta_root_pos = root_pos - prev_root_pos   
     root_vel = delta_root_pos / dt                                            # [num_envs, 3]
     
-    # local_tar_dir
+    # global_tar_dir
     tar_dir = heading_tensor[:, 0:2]
     tar_sp = heading_tensor[:, -1]
 
-    tar_dir = torch.cat((tar_dir, torch.zeros(root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
-
-    # local2global: global_tar_dir
-    UP_AXIS = 2
-    heading = heading_zup(root_rot)     # (num_envs, ) angle
-    up_dir = torch.zeros_like(root_pos)                                             # N x 1 x 3
-    up_dir[..., UP_AXIS] = 1
-    heading_rot = axang2quat(up_dir, heading)                                       # N x 4
-    g_tar_dir = rotatepoint(heading_rot, tar_dir)                                   # [N, 3]
-
     # sim charac's global target_direction speed, velocity
-    tar_dir_speed = torch.sum(g_tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)
-    tar_dir_vel = tar_dir_speed.unsqueeze(-1) * g_tar_dir[..., :2]                    # N x 2
+    tar_dir_speed = torch.sum(tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)
+    tar_dir_vel = tar_dir_speed.unsqueeze(-1) * tar_dir                           # N x 2
 
     # sp difference
     tangent_vel = root_vel[..., :2] - tar_dir_vel                                   # N x 2
@@ -2694,13 +2684,28 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
 
 @torch.jit.script
 def observe_heading_obs(state_hist: torch.Tensor, target_tensor: torch.Tensor, sp_upper_bound: float):
-    #! root position 관련 항목
-    root_pos = state_hist[-1, :, :3]                    # [num_envs, 3]         current global_pos!
-    local_tar_dir = target_tensor[:, 0:2] 
+    tar_dir = target_tensor[:, 0:2] 
     tar_sp = target_tensor[:, 2]
+    tar_dir = torch.cat((tar_dir, torch.zeros(tar_dir.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
+
+    root_pos = state_hist[-1, :, :3]                                    # [num_envs, 3]         current global_pos!
+    root_orient = state_hist[-1, :, 3:7]        
+    
+    # calculate root_heading
+    UP_AXIS = 2
+    origin = root_pos.clone()                                           # N x 3
+    origin[..., UP_AXIS] = 0     
+    heading = heading_zup(root_orient)                                  # N
+    up_dir = torch.zeros_like(origin)                                   # N x 3
+    up_dir[..., UP_AXIS] = 1
+    
+    heading_orient_inv = axang2quat(up_dir, -heading)                   # N x 4
+    local_tar_dir = rotatepoint(heading_orient_inv, tar_dir)                                      # N x 3
+
+
     tar_sp.clip_(max=sp_upper_bound)
 
-    return torch.cat((root_pos, local_tar_dir, tar_sp.unsqueeze_(-1)), -1)
+    return torch.cat((root_pos, local_tar_dir[..., :2], tar_sp.unsqueeze_(-1)), -1)
 
 @torch.jit.script
 def observe_lbody_goal(state_hist: torch.Tensor,
