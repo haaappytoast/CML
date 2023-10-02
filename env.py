@@ -2579,10 +2579,10 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             # self.init_dist[env_ids] = dist
             # tar_dir
             self.goal_timer[env_ids] = change_steps_timer
-            self.goal_tensor[env_ids, start_idx + 0] = tar_dir[env_ids,0]
-            self.goal_tensor[env_ids, start_idx + 1] = tar_dir[env_ids,1]
+            self.goal_tensor[env_ids, start_idx + 0] = tar_dir[:,0]
+            self.goal_tensor[env_ids, start_idx + 1] = tar_dir[:,1]
             # tar_sp
-            self.goal_tensor[env_ids, start_idx + 2] = tar_sp[env_ids]
+            self.goal_tensor[env_ids, start_idx + 2] = tar_sp
             
     def reset_envs(self, env_ids):
         super().reset_envs(env_ids)
