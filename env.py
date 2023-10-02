@@ -2567,7 +2567,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
 
         if all_envs:
-            # self.init_dist = dist
             self.goal_timer.copy_(change_steps_timer)
             # tar_dir
             self.goal_tensor[:,start_idx + 0] = tar_dir[:,0]        # x-dir
@@ -2576,7 +2575,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.goal_tensor[:,start_idx + 2] = tar_sp        # speed
 
         else:
-            # self.init_dist[env_ids] = dist
             # tar_dir
             self.goal_timer[env_ids] = change_steps_timer
             self.goal_tensor[env_ids, start_idx + 0] = tar_dir[:,0]
@@ -2673,7 +2671,7 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
 
     # sim charac's global target_direction speed, velocity
     tar_dir_speed = torch.sum(g_tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)
-    tar_dir_vel = tar_dir_speed.unsqueeze(-1) * tar_dir[..., :2]                    # N x 2
+    tar_dir_vel = tar_dir_speed.unsqueeze(-1) * g_tar_dir[..., :2]                    # N x 2
 
     # sp difference
     tangent_vel = root_vel[..., :2] - tar_dir_vel                                   # N x 2
