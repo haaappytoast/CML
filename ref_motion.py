@@ -299,10 +299,10 @@ class ReferenceMotion():
         motion_len = self.motion_length[motion_ids]
         if (truncate_time is not None): motion_len -= truncate_time
         
-        start_phase = np.random.uniform(low=0.0, high=0.5, size=motion_ids.shape)
+        start_phase = np.random.uniform(low=0.0, high=0.5, size=motion_ids.shape)       # time: 0~0.5 사이에서 시작
         start_motion_time = start_phase * motion_len
-        duration_phase = np.random.uniform(low=0.25, high=0.5, size=motion_ids.shape)
+        duration_phase = np.random.uniform(low=0.3, high=0.5, size=motion_ids.shape)
         end_motion_phase = np.clip(start_phase + duration_phase, 0.0, 1.0)
         end_motion_time = end_motion_phase * motion_len
-        return motion_ids, start_motion_time, end_motion_time
+        return motion_ids, start_motion_time, end_motion_time                           # 모션 끝나는 시점
         

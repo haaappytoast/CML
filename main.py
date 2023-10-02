@@ -49,7 +49,7 @@ FPS = 30
 FRAMESKIP = 2
 CONTROL_MODE = "position"
 HORIZON = 8
-NUM_ENVS = 512
+NUM_ENVS = 2
 BATCH_SIZE = 256 #HORIZON*NUM_ENVS//16
 OPT_EPOCHS = 5
 ACTOR_LR = 5e-6
@@ -191,11 +191,12 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
             seq_len = info["ob_seq_lens"]   # for each environment, how many sequences character observed
             reward_weights = info["reward_weights"]
             actions, values, log_probs = model.act(obs, seq_len-1, stochastic=True)
-            obs_, rews, dones, info = env.step(actions)
+            obs_, rews, dones, info = env.step(actions)     # NEXT OBS!!! (apply_actions -> do_simulation -> reward -> termination_check -> overtime_check -> observe)
             log_probs = log_probs.sum(-1, keepdim=True)
             not_done = (~dones).unsqueeze_(-1)
             terminate = info["terminate"]
-            
+
+            # Discriminator observations
             fakes = info["disc_obs"]
             reals = info["disc_obs_expert"]
             disc_seq_len = info["disc_seq_len"]
@@ -588,4 +589,5 @@ if __name__ == "__main__":
                 raise ValueError("Please correctly type checkpoint path to resume training")
 
         else:
+            env.render()
             train(env, model, settings.ckpt, training_params, reward_coeff)

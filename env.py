@@ -1866,7 +1866,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
-        self.visualize_goal_positions_wrt_curr()
+        # self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -2476,21 +2476,21 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_TENSOR_DIM = 0                            # (3 + 3 + 3) + (4) + (3) rlh ggpositions + h ggquats + root_pos
     GOAL_DIM = 0                                   # (4 + 4 + 4 + 6 + 4)     rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 
-    ROOT_COEFF = 1
-
+    HEADING_COEFF = 1
+    ENABLE_RANDOM_HEADING = True
     def __init__(self, *args, 
                  sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
 
-        self.root_coeff = parse_kwarg(kwargs, "root_pos", self.ROOT_COEFF)
-        self.root_coeff = parse_kwarg(kwargs, "root_pos", self.ROOT_COEFF)
+        self.heading_coeff = parse_kwarg(kwargs, "heading", self.HEADING_COEFF)
+        self._enable_rand_heading = parse_kwarg(kwargs, "enableRandomHeading", self.ENABLE_RANDOM_HEADING) #! training 시 random_heading 필요
         self.sensor_inputs = sensor_inputs
         
-        if (self.root_coeff != 0):
-            self.GOAL_TENSOR_DIM += 3
-            self.GOAL_DIM += 4
+        if (self.heading_coeff != 0):
+            self.GOAL_TENSOR_DIM += 3       # global tar_dir (2), global tar_sp (1)
+            self.GOAL_DIM += 6              # root_global_pos (3), local tar_dir (2),  local tar_sp (1)
         
-        #! JOYSTICK INPUT
+        #! JOYSTICK INPUT (이건 test 시! --> 나중에 필요할 듯)
         for name, sensorconfig in self.sensor_inputs.items():
             xy_pressed = np.load(os.getcwd() + sensorconfig.xy_pressed)
             xy_pressed = torch.tensor(xy_pressed, dtype=torch.float32)
@@ -2528,7 +2528,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         if self.goal_timer is not None:
             self.goal_timer -= 1
             env_ids = torch.nonzero(self.goal_timer <= 0).view(-1)
-            # print("self.goal_timer: ", self.goal_timer)
+            #! goal_timer가 지났으면 goal reset!
             if len(env_ids) > 0: 
                 self.reset_leg_control_goal(env_ids)
                 self.reset_goal_motion_ids(env_ids)
@@ -2539,88 +2539,76 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             return self.lifetime >= self.episode_length
         return None
 
+    #! for train
     def reset_leg_control_goal(self, env_ids):
         n_envs = len(env_ids)
         all_envs = n_envs == len(self.envs)
         root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
 
-        small_turn = torch.rand(n_envs, device=self.device) > self.sharp_turn_rate                      # 0~1 사이 난수 발생
-        large_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(2*np.pi)         # 0~2pi 사이
-        small_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).sub_(0.5).mul_(2*(np.pi/3))   
-
-        heading = heading_zup(root_orient)
-        small_angle += heading
-        theta = torch.where(small_turn, small_angle, large_angle)   # (condition, input, other)
-
-        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-
-        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
-            vel = self.goal_sp_min
-        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
-            vel = self.goal_sp_mean
+        if (self._enable_rand_heading):
+            rand_theta = 2 * np.pi * torch.rand(n_envs, device=self.device) - np.pi                  #   -pi ~ pi
         else:
-            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
+            rand_theta = torch.zeros(n_envs, device=self.device)
+
+        change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
         
-        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
-        dx = dist*torch.cos(theta)
-        dy = dist*torch.sin(theta)
+        tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
+        
+        if self.goal_sp_min == self.goal_sp_max:
+            tar_sp = self.goal_sp_min                                                       # (num_envs, )
+        elif self.goal_sp_std == 0:
+            tar_sp = self.goal_sp_mean
+        else:
+            tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
+
+        self.tar_dir = tar_dir
+        self.tar_sp = tar_sp
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
 
         if all_envs:
-            self.init_dist = dist
-            self.goal_timer.copy_(timer)
-            self.goal_tensor[:,start_idx + 0] = self.root_pos[:,0] + dx
-            self.goal_tensor[:,start_idx + 1] = self.root_pos[:,1] + dy
-        else:
-            self.init_dist[env_ids] = dist
-            self.goal_timer[env_ids] = timer
-            self.goal_tensor[env_ids, start_idx + 0] = self.root_pos[env_ids,0] + dx
-            self.goal_tensor[env_ids, start_idx + 1] = self.root_pos[env_ids,1] + dy
+            # self.init_dist = dist
+            self.goal_timer.copy_(change_steps_timer)
+            # tar_dir
+            self.goal_tensor[:,start_idx + 0] = tar_dir[:,0]        # x-dir
+            self.goal_tensor[:,start_idx + 1] = tar_dir[:,1]        # y-dir
+            # tar_sp
+            self.goal_tensor[:,start_idx + 2] = tar_sp        # speed
 
+        else:
+            # self.init_dist[env_ids] = dist
+            # tar_dir
+            self.goal_timer[env_ids] = change_steps_timer
+            self.goal_tensor[env_ids, start_idx + 0] = tar_dir[env_ids,0]
+            self.goal_tensor[env_ids, start_idx + 1] = tar_dir[env_ids,1]
+            # tar_sp
+            self.goal_tensor[env_ids, start_idx + 2] = tar_sp[env_ids]
+            
     def reset_envs(self, env_ids):
         super().reset_envs(env_ids)
         #! b/c reset goal in every steps!
         # self.reset_goal(env_ids)
+        print("\n\n -------reset leg control goal!----- \n\n")
         self.reset_leg_control_goal(env_ids)
+        pass
 
     def reward(self):
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
 
-        sensor_tensor = self.goal_tensor[:, :start_idx]
+        sensor_tensor = self.goal_tensor[:, :start_idx]     
+        heading_tensor = self.goal_tensor[:, start_idx:]
         control_tensor = self.goal_tensor[:, start_idx:]
         
         sensor_rew = super().reward(sensor_tensor)
 
-        p = self.root_pos                                       # 현재 root_pos
-        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
+        # heading reward
+        root_pos = self.root_pos                                       # 현재 root_pos
+        root_rot = self.root_orient
+        root_pos_prev = self.state_hist[-1][:, :3]                     # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
+        _print = True
+        heading_rew = compute_heading_reward(root_pos, root_pos_prev, root_rot, heading_tensor, self.fps, _print, self.heading_coeff)
 
-        dp_ = control_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
-        dp_[:, self.UP_AXIS] = 0
-        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
-        v_ = dp_.div_(self.goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
-
-        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
-        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
-        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
-
-        dp = p - p_                                            # (현재 root - 이전 root)
-        dp[:, self.UP_AXIS] = 0
-        v = dp / self.step_time                                # current velocity: dp / duration 
-        control_rew = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
-
-        dp = control_tensor - p
-        dp[:, self.UP_AXIS] = 0
-        dist = torch.linalg.norm(dp, ord=2, dim=-1)
-        self.near = dist < self.goal_radius
-
-        control_rew[self.near] = 1
-        
-        if self.viewer is not None:
-            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
-
-        # control_rew = None
-        r = torch.cat((sensor_rew, control_rew.unsqueeze_(-1)), -1)
+        r = torch.cat((sensor_rew, heading_rew.unsqueeze_(-1)), -1)
         return r
 
     def update_viewer(self):
@@ -2629,55 +2617,92 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         n_lines = 10
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
-        tar_x = self.goal_tensor[:, start_idx].cpu().numpy()
+        tar_dir = self.goal_tensor[:, start_idx:start_idx+2]
+        tar_dir = torch.cat((tar_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
+        # local2global: global_tar_dir
+        UP_AXIS = 2
+        heading = heading_zup(self.root_orient)     # (num_envs, ) angle
+        up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
+        up_dir[..., UP_AXIS] = 1
+        heading_rot = axang2quat(up_dir, heading)                                            # N x 4
+        g_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
+
+        tar_x = g_tar_dir[..., 0]
+        tar_y = g_tar_dir[..., 1]
+        
+        tar_sp = self.goal_tensor[:, -1].cpu().numpy()
 
         p = self.root_pos.cpu().numpy()
         zero = np.zeros_like(tar_x)+0.05
-        tar_y = self.goal_tensor[:, start_idx+1].cpu().numpy()
+
         lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
-        for i in range(n_lines)], -2)
+            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_x, p[:,1] + tar_y, zero), -1) 
+            for i in range(n_lines)], -2)
+        
         for e, l in zip(self.envs, lines):
             self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
-        n_lines = 10
-        target_pos = self.goal_tensor[:, start_idx:start_idx+2].cpu().numpy()
-        lines = np.stack([
-            np.stack((
-                target_pos[:, 0], target_pos[:, 1], zero,
-                target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
-                target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
-                zero
-            ), -1)
-        for i in range(n_lines)], -2)
-        for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
 
 @torch.jit.script
-def observe_root_goal(state_hist: torch.Tensor,
-target_tensor: torch.Tensor, timer: torch.Tensor,
-sp_upper_bound: float, fps: int):
+def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, root_rot: torch.Tensor, 
+                        heading_tensor: torch.Tensor, fps: int, _print: bool, heading_coeff: float):
+        # heading_rew = compute_heading_reward(root_pos, root_pos_prev, root_rot, heading_tensor, _print)
+    vel_err_scale = 0.25
+    tangent_err_w = 0.1
+
+    dir_reward_w = heading_coeff
+    facing_reward_w = 0.0
+    
+    # sim root vel (global)
+    dt = 1.0/fps                                
+    delta_root_pos = root_pos - prev_root_pos   
+    root_vel = delta_root_pos / dt                                            # [num_envs, 3]
+    
+    # local_tar_dir
+    tar_dir = heading_tensor[:, 0:2]
+    tar_sp = heading_tensor[:, -1]
+
+    tar_dir = torch.cat((tar_dir, torch.zeros(root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
+
+    # local2global: global_tar_dir
+    UP_AXIS = 2
+    heading = heading_zup(root_rot)     # (num_envs, ) angle
+    up_dir = torch.zeros_like(root_pos)                                             # N x 1 x 3
+    up_dir[..., UP_AXIS] = 1
+    heading_rot = axang2quat(up_dir, heading)                                       # N x 4
+    g_tar_dir = rotatepoint(heading_rot, tar_dir)                                   # [N, 3]
+
+    # sim charac's global target_direction speed, velocity
+    tar_dir_speed = torch.sum(g_tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)
+    tar_dir_vel = tar_dir_speed.unsqueeze(-1) * tar_dir[..., :2]                    # N x 2
+
+    # sp difference
+    tangent_vel = root_vel[..., :2] - tar_dir_vel                                   # N x 2
+    tangent_speed = torch.sum(tangent_vel, dim=-1)                                  # (N,)
+
+    tar_vel_err = tar_sp - tar_dir_speed                                            # (N,)
+    tangent_vel_err = tangent_speed
+    
+    dir_reward = torch.exp(-vel_err_scale * (tar_vel_err * tar_vel_err + 
+                        tangent_err_w * tangent_vel_err * tangent_vel_err))
+
+    speed_mask = tar_dir_speed <= 0
+    dir_reward[speed_mask] = 0
+
+    reward = dir_reward_w * dir_reward
+
+    if (_print):
+        print("dir_reward: ", dir_reward[0].item(), " | ", (dir_reward_w * dir_reward)[0].item())
+    return reward
+
+@torch.jit.script
+def observe_heading_obs(state_hist: torch.Tensor, target_tensor: torch.Tensor, sp_upper_bound: float):
     #! root position 관련 항목
-    root_pos = state_hist[-1, :, :3]
-    root_orient = state_hist[-1, :, 3:7]
+    root_pos = state_hist[-1, :, :3]                    # [num_envs, 3]         current global_pos!
+    local_tar_dir = target_tensor[:, 0:2] 
+    tar_sp = target_tensor[:, 2]
+    tar_sp.clip_(max=sp_upper_bound)
 
-    dp = target_tensor - root_pos
-    x = dp[:, 0]
-    y = dp[:, 1]
-    heading_inv = -heading_zup(root_orient)
-    c = torch.cos(heading_inv)      # root_orientation의 x-dir의 각도 (inverse) 
-    s = torch.sin(heading_inv)
-    x, y = c*x-s*y, s*x+c*y         # [[c -s], [s c]] * [x y]^T (local_dp -> root_orient에서 바라본 dp)
-
-    dist = (x*x + y*y).sqrt_()
-    sp = dist.mul(fps/timer)        # speed! ... dist/timer->how many dist we should go per step ... dist*fps/timer -> how much distance we should go in 1 sec
-
-    too_close = dist < 1e-5
-    x = torch.where(too_close, x, x/dist)   # x/dist: normalized x
-    y = torch.where(too_close, y, y/dist)
-    sp.clip_(max=sp_upper_bound)
-    dist.div_(3).clip_(max=1.5)
-
-    return torch.cat((x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
+    return torch.cat((root_pos, local_tar_dir, tar_sp.unsqueeze_(-1)), -1)
 
 @torch.jit.script
 def observe_lbody_goal(state_hist: torch.Tensor,
@@ -2811,15 +2836,13 @@ def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
     target_tensor: torch.Tensor, timer: torch.Tensor,
     sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool]
 ):
-    start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3 + int(rlh_coeffs[3]) * 4
+    start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3 + int(rlh_coeffs[3]) * 4     # upper body idxs
     
     sensor_tensor = target_tensor[:, :start_idx]
-    # target_tensor = target_tensor[:, 13:16]
-    #! 
-    target_tensor = target_tensor[:, start_idx:start_idx+3]
+    target_tensor = target_tensor[:, start_idx:start_idx+3] # tar_dir_x, tar_dir_y, tar_sp
 
     ob = observe_iccgan(state_hist, seq_len)
     ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs)                  # [env_ids, (4 + 4 + 4 + 6)]
-    root_ob = observe_root_goal(state_hist, target_tensor, timer, sp_upper_bound, fps)  # [env_ids, 4]
+    heading_ob = observe_heading_obs(state_hist, target_tensor, sp_upper_bound)  # [env_ids, 4]
 
-    return torch.cat((ob, ubody_ob, root_ob), -1)
+    return torch.cat((ob, ubody_ob, heading_ob), -1)
