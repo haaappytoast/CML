@@ -22,11 +22,12 @@ training_params = dict(
 )
 
 reward_coeff = dict(
-    rhand_pos = 0.35,      # 3
-    lhand_pos = 0.35,      # 3
-    hmd_pos = 0.2,         # 3
+    rhand_pos = 0.35,       # 3
+    lhand_pos = 0.35,       # 3
+    hmd_pos = 0.2,          # 3
     hmd_rot = 0.1,          # 4
-    heading = 1.
+    heading = 0.7,          # 3
+    facing = 0.3            # 2
 )
 
 sensor_input = { 

@@ -4,7 +4,7 @@ import os
 from isaacgym import gymapi, gymtorch
 import torch
 import utils
-from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized, quat_inverse
+from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized, quat_inverse, calc_heading_quat
 from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView
@@ -2372,15 +2372,15 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             glob_hmd_pos = rotatepoint(heading_orient, ego_hmd_pos)
             glob_rcontrol_pos = rotatepoint(heading_orient, ego_rcontrol_pos)
             glob_lcontrol_pos = rotatepoint(heading_orient, ego_lcontrol_pos)
-
+            
             # 지금 character가 향하고 있는 방향에 대해서 (offset, 0, 0) 만큼 떨어져서 visualize 되도록
             offset = -0.7
             offset_vec = torch.tensor([0, offset, 0], dtype=torch.float32, device=self.device)
             ego_offset_vec = rotatepoint(heading_orient, offset_vec)
 
-            hmd_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_hmd_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_hmd_pos[i, 1], ego_offset_vec[i, 2] + glob_hmd_pos[i, 2]), r=None)
-            rcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_rcontrol_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_rcontrol_pos[i, 1], ego_offset_vec[i, 2] + glob_rcontrol_pos[i, 2]), r=None)
-            lcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_lcontrol_pos[i, 0], ego_offset_vec[i, 1] + root_pos[i, 1] + glob_lcontrol_pos[i, 1], ego_offset_vec[i, 2] + glob_lcontrol_pos[i, 2]), r=None) 
+            hmd_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_hmd_pos[i, 0], ego_offset_vec[0, 1] + root_pos[i, 1] + glob_hmd_pos[i, 1], ego_offset_vec[0, 2] + glob_hmd_pos[i, 2]), r=None)
+            rcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_rcontrol_pos[i, 0], ego_offset_vec[0, 1] + root_pos[i, 1] + glob_rcontrol_pos[i, 1], ego_offset_vec[0, 2] + glob_rcontrol_pos[i, 2]), r=None)
+            lcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_lcontrol_pos[i, 0], ego_offset_vec[0, 1] + root_pos[i, 1] + glob_lcontrol_pos[i, 1], ego_offset_vec[0, 2] + glob_lcontrol_pos[i, 2]), r=None) 
             control_geom = gymutil.WireframeSphereGeometry(0.03, 16, 16, None, color=(1, 1, 0))   # black
 
             gymutil.draw_lines(control_geom, self.gym, self.viewer, self.envs[i], hmd_pos)
@@ -2393,7 +2393,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  # [num_envs, 3]
                 glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
 
-                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[0, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[0, 2] + glob_link_pos[i, 2]), r=None)
                 gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white 
             
             # 왼쪽 팔
@@ -2402,7 +2402,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  
                 glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
                 
-                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[0, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[0, 2] + glob_link_pos[i, 2]), r=None)
                 gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
 
             # torso, pelvis
@@ -2411,7 +2411,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 ego_link_pos = self.global_to_ego(goal_root_pos, goal_root_rot, link_pos, 2)  
                 glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
                 
-                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[0, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[0, 2] + glob_link_pos[i, 2]), r=None)
                 gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
             
             # # lower body
@@ -2420,7 +2420,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             #     ego_link_pos = self.global_to_ego(self.lbody_goal_root_tensor[:, 0, :3], self.lbody_goal_root_tensor[:, 0, 3:7], link_pos, 2)  
             #     glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
                 
-            #     link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+            #     link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
             #     gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
 
 
@@ -2481,21 +2481,28 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_TENSOR_DIM = 0                            # (3 + 3 + 3) + (4) + (3) rlh ggpositions + h ggquats + root_pos
     GOAL_DIM = 0                                   # (4 + 4 + 4 + 6 + 4)     rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 
-    HEADING_COEFF = 1
+    HEADING_COEFF = 0
+    FACING_COEFF = 0
+
     ENABLE_RANDOM_HEADING = True
     def __init__(self, *args, 
                  sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
-
         self.heading_coeff = parse_kwarg(kwargs, "heading", self.HEADING_COEFF)
+        self.facing_coeff = parse_kwarg(kwargs, "facing", self.FACING_COEFF)
         self._enable_rand_heading = parse_kwarg(kwargs, "enableRandomHeading", self.ENABLE_RANDOM_HEADING) #! training 시 random_heading 필요
         self.sensor_inputs = sensor_inputs
         
+        self.root_coeffs = [False] * 2
         if (self.heading_coeff != 0):
             self.GOAL_TENSOR_DIM += 3       # global tar_dir (2), global tar_sp (1)
             self.GOAL_DIM += 6              # root_global_pos (3), local tar_dir (2),  local tar_sp (1)
-        
-            # joystick = torch.tensor(joystick, dtype=torch.float32)
+            self.root_coeffs[0] = True
+
+        if (self.facing_coeff != 0):
+            self.GOAL_TENSOR_DIM += 2       # global facing_tar_dir (2)
+            self.GOAL_DIM += 2              # local_face_tar_dir
+            self.root_coeffs[1] = True
 
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
 
@@ -2513,13 +2520,13 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
                 self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, 
-                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs = self.rlh_coeffs
+                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs
             )
         else:
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
                 self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, 
-                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs = self.rlh_coeffs
+                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs
             )
 
     def reset_goal_motion_ids(self, env_ids):
@@ -2552,32 +2559,28 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         n_envs = len(env_ids)
         all_envs = n_envs == len(self.envs)
         root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
-
-        if (self.inference):    # test time
+        # test time
+        if (self.inference):
             joystick = self.joystick[self.lifetime % self.joystick.size(0), :] 
             global_theta = torch.atan2(joystick[..., 1], joystick[..., 0])       # [1]
             g_tar_dir = torch.stack([torch.cos(global_theta), torch.sin(global_theta), torch.zeros(1, device=self.device)], dim=-1)       # [1, 3]
-            # global2local
-            UP_AXIS = 2
-            heading = heading_zup(self.root_orient)                                              # (num_envs, ) angle
-            up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
-            up_dir[..., UP_AXIS] = 1
-            heading_rot = axang2quat(up_dir, -heading)                                            # N x 4
-            local_tar_dir = rotatepoint(heading_rot, g_tar_dir)                                  # N x 3
-            # print("local_tar_dir.shape: ", local_tar_dir.shape)
-            # print("joystick: ", joystick)
-            # print("g_tar_dir: ", g_tar_dir)
 
             rand_theta = global_theta
             tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1, keepdim=True)
+            #! need to change later facing!
+            rand_face_theta = torch.zeros(n_envs, device=self.device)
 
-        else:                   # train time
+        # train time
+        else:                   
+            # target heading direction & facing direction
             if (self._enable_rand_heading):
                 rand_theta = 2 * np.pi * torch.rand(n_envs, device=self.device) - np.pi                  #   -pi ~ pi
+                rand_face_theta = 2 * np.pi * torch.rand(n_envs, device=self.device) - np.pi             #   -pi ~ pi
             else:
                 rand_theta = torch.zeros(n_envs, device=self.device)
-            
-            # global
+                rand_face_theta = torch.zeros(n_envs, device=self.device)
+
+            # target speed
             if self.goal_sp_min == self.goal_sp_max:
                 tar_sp = self.goal_sp_min                                                       # (num_envs, )
             elif self.goal_sp_std == 0:
@@ -2585,15 +2588,13 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             else:
                 tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
 
+
         change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
         tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
-        
-
-        # self.tar_dir = tar_dir
-        # self.tar_sp = tar_sp
+        face_tar_dir = torch.stack([torch.cos(rand_face_theta), torch.sin(rand_face_theta)], dim=-1)
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
-
+        root_start_idx = start_idx + int(self.root_coeffs[0]) * 3
         if all_envs:
             self.goal_timer.copy_(change_steps_timer)
             # tar_dir
@@ -2601,7 +2602,10 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.goal_tensor[:,start_idx + 1] = tar_dir[:,1]        # y-dir
             # tar_sp
             self.goal_tensor[:,start_idx + 2] = tar_sp        # speed
-
+            # tar_facing_dir
+            if self.root_coeffs[1]:
+                self.goal_tensor[:,root_start_idx + 0] = face_tar_dir[:,0]        # x-dir
+                self.goal_tensor[:,root_start_idx + 1] = face_tar_dir[:,1]        # y-dir 
         else:
             # tar_dir
             self.goal_timer[env_ids] = change_steps_timer
@@ -2609,6 +2613,10 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.goal_tensor[env_ids, start_idx + 1] = tar_dir[:,1]
             # tar_sp
             self.goal_tensor[env_ids, start_idx + 2] = tar_sp
+            # tar_facing_dir
+            if self.root_coeffs[1]:
+                self.goal_tensor[env_ids,root_start_idx + 0] = face_tar_dir[:,0]        # x-dir
+                self.goal_tensor[env_ids,root_start_idx + 1] = face_tar_dir[:,1]        # y-dir 
             
     def reset_envs(self, env_ids):
         super().reset_envs(env_ids)
@@ -2621,7 +2629,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         obs, rews, dones, info = super().step(actions)
 
         # inference 일때는, reset_leg_control_goal도 계속 step마다 갱신해줘야함
-        #! start here
         if self.inference:
             env_ids = [i for i in range(len(self.envs))]
             self.reset_leg_control_goal(env_ids)
@@ -2629,79 +2636,129 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         return obs, rews, dones, info
     def reward(self):
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
+        root_start_idx = start_idx + int(self.root_coeffs[0])*3
 
         sensor_tensor = self.goal_tensor[:, :start_idx]     
-        heading_tensor = self.goal_tensor[:, start_idx:]
-        
+        heading_tensor = self.goal_tensor[:, start_idx:start_idx+3]
+        facing_tensor = self.goal_tensor[:, root_start_idx:]
+
         sensor_rew = super().reward(sensor_tensor)
 
-        # heading reward
+        # heading reward & facing reward
         root_pos = self.root_pos                                       # 현재 root_pos
         root_rot = self.root_orient
         root_pos_prev = self.state_hist[-1][:, :3]                     # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
-        _print=False
-        heading_rew = compute_heading_reward(root_pos, root_pos_prev, root_rot, heading_tensor, self.fps, _print, self.heading_coeff)
+        heading_rew = torch.zeros_like(sensor_rew)
+        facing_rew = torch.zeros_like(sensor_rew)
+        if self.root_coeffs[0]:
+            heading_rew = compute_heading_reward(root_pos, root_pos_prev, heading_tensor, self.fps)
+            heading_rew.unsqueeze_(-1)
 
-        r = torch.cat((sensor_rew, heading_rew.unsqueeze_(-1)), -1)
+        if self.root_coeffs[1]:
+            facing_rew = compute_facing_reward(root_pos, root_rot, facing_tensor)
+            facing_rew.unsqueeze_(-1)
+
+        lower_goal_rew = self.heading_coeff * heading_rew + self.facing_coeff * facing_rew
+
+        r = torch.cat((sensor_rew, lower_goal_rew), -1)
         return r
 
-    def update_viewer(self):
-        super().update_viewer()
-        # self.gym.clear_lines(self.viewer)
+    # visualize target heading direction & simulated character heading direction
+    def visualize_heading_dir(self):
         n_lines = 10
+        
+        if self.root_coeffs[0]:
+            start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
+            # global direction
+            tar_dir = self.goal_tensor[:, start_idx:start_idx+2]
+            tar_dir = torch.cat((tar_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
+            
+            tar_x = tar_dir[..., 0].cpu().numpy()
+            tar_y = tar_dir[..., 1].cpu().numpy()
+            
+            tar_sp = self.goal_tensor[:, -1].cpu().numpy()
+            p = self.root_pos.cpu().numpy()
+            zero = np.zeros_like(tar_x)+0.05
 
-        start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
-        # global direction
-        tar_dir = self.goal_tensor[:, start_idx:start_idx+2]
-        tar_dir = torch.cat((tar_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
-        
-        tar_x = tar_dir[..., 0].cpu().numpy()
-        tar_y = tar_dir[..., 1].cpu().numpy()
-        
-        tar_sp = self.goal_tensor[:, -1].cpu().numpy()
-        p = self.root_pos.cpu().numpy()
-        zero = np.zeros_like(tar_x)+0.05
+            lines = np.stack([
+                np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * tar_x, p[:,1] + tar_sp * tar_y, zero), -1) 
+                for i in range(n_lines)], -2)
+            
+            for e, l in zip(self.envs, lines):
+                self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])      # red -> global
+
+        # sim character's heading direction #! --> 이후에 smoothed direction으로??
+        sim_p = self.root_pos
+        sim_p_ = self.state_hist[-1][:, :3]
+        dt = 1.0/self.fps 
+        sim_delta_p = sim_p - sim_p_
+        sim_vel = sim_delta_p / dt                                                             # [num_envs, 3]
+        sim_dir = torch.cat((sim_vel[..., 0:2], torch.zeros((sim_vel.size(0), 1), device=sim_vel.device)), -1)   # x-dir
+        sim_dir = sim_dir / torch.norm(sim_dir, dim=-1, keepdim=True).repeat(1, 3)
+        sim_x = sim_dir[..., 0].cpu().numpy()
+        sim_y = sim_dir[..., 1].cpu().numpy()
+
+        zero = np.zeros_like(sim_x)+0.05
 
         lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * tar_x, p[:,1] + tar_sp * tar_y, zero), -1) 
+            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * sim_x, p[:,1] + tar_sp * sim_y, zero), -1) 
             for i in range(n_lines)], -2)
         
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])      # red -> global
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
 
-        # # global2local: global_tar_dir
-        # UP_AXIS = 2
-        # heading = heading_zup(self.root_orient)     # (num_envs, ) angle
-        # up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
-        # up_dir[..., UP_AXIS] = 1
-        # heading_rot = axang2quat(up_dir, -heading)                                            # N x 4
-        # local_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
+    # visualize root facing
+    def visualize_facing_dir(self):
+        n_lines = 10        
+        if self.root_coeffs[1]:
+            start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
+            root_start_idx = start_idx + int(self.root_coeffs[0]) * 3
 
-        # tar_x = local_tar_dir[..., 0]
-        # tar_y = local_tar_dir[..., 1]
-        
-        # p = self.root_pos.cpu().numpy()
-        # zero = np.zeros_like(tar_x)+0.05
+            # global direction
+            tar_face_dir = self.goal_tensor[:, root_start_idx:root_start_idx+2]
+            tar_face_dir = torch.cat((tar_face_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_face_dir.device)), -1)     # [N, 3]
+            
+            tar_face_x = tar_face_dir[..., 0].cpu().numpy()
+            tar_face_y = tar_face_dir[..., 1].cpu().numpy()
+            
+            tar_sp = self.goal_tensor[:, -1].cpu().numpy()
+            p = self.root_pos.cpu().numpy()
+            zero = np.zeros_like(tar_face_x)+0.05
 
-        # lines = np.stack([
-        #     np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_x, p[:,1] + tar_y, zero), -1) 
-        #     for i in range(n_lines)], -2)
-        
-        # for e, l in zip(self.envs, lines):
-        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue -> local
+            lines = np.stack([
+                np.stack((p[:,0], p[:,1], p[:,2]+0.01*i, p[:,0] + tar_sp * tar_face_x, p[:,1] + tar_sp * tar_face_y, p[:,2]), -1) 
+                for i in range(n_lines)], -2)
+            
+            for e, l in zip(self.envs, lines):
+                self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 1., 1.] for _ in range(n_lines)])      # red -> global
 
+        # sim character's facing direction #! --> 이후에 smoothed direction으로??
+        heading_rot = calc_heading_quat(self.root_orient)
+        sim_fdir = torch.zeros_like(self.root_pos)
+        sim_fdir[..., 0] = 1.0
+        sim_fdir = rotatepoint(heading_rot, sim_fdir)  
+        sim_fx = sim_fdir[..., 0].cpu().numpy()
+        sim_fy = sim_fdir[..., 1].cpu().numpy()
+        sim_p = self.root_pos.cpu().numpy()
+
+        lines = np.stack([
+            np.stack((sim_p[:,0], sim_p[:,1], sim_p[:,2]+0.01*i, sim_p[:,0] + 0.5 * sim_fx, sim_p[:,1] + 0.5 * sim_fy, sim_p[:,2]), -1) 
+            for i in range(n_lines)], -2)
+        for e, l in zip(self.envs, lines):
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 0.] for _ in range(n_lines)])  # blue
+
+    def update_viewer(self):
+        super().update_viewer()
+        self.visualize_heading_dir()
+        self.visualize_facing_dir()
 
 
 @torch.jit.script
-def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, root_rot: torch.Tensor, 
-                        heading_tensor: torch.Tensor, fps: int, _print: bool, heading_coeff: float):
-        # heading_rew = compute_heading_reward(root_pos, root_pos_prev, root_rot, heading_tensor, _print)
+def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
+                        heading_tensor: torch.Tensor, fps: int):
     vel_err_scale = 0.25
     tangent_err_w = 0.1
 
-    dir_reward_w = heading_coeff
-    facing_reward_w = 0.0
-    
     # sim root vel (global)
     dt = 1.0/fps                                
     delta_root_pos = root_pos - prev_root_pos   
@@ -2728,11 +2785,19 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
     speed_mask = tar_dir_speed <= 0
     dir_reward[speed_mask] = 0
 
-    reward = dir_reward_w * dir_reward
-
-    if (_print):
-        print("dir_reward: ", dir_reward[0].item(), " | ", (dir_reward_w * dir_reward)[0].item())
+    reward = dir_reward
     return reward
+
+@torch.jit.script
+def compute_facing_reward(root_pos: torch.Tensor, root_rot: torch.Tensor, tar_face_dir: torch.Tensor):
+    # sim character's facing direction
+    heading_rot = calc_heading_quat(root_rot)
+    facing_dir = torch.zeros_like(root_pos)
+    facing_dir[..., 0] = 1.0
+    facing_dir = rotatepoint(heading_rot, facing_dir)
+    facing_err = torch.sum(tar_face_dir * facing_dir[..., 0:2], dim=-1)
+    facing_reward = torch.clamp_min(facing_err, 0.0)
+    return facing_reward
 
 @torch.jit.script
 def observe_heading_obs(state_hist: torch.Tensor, target_tensor: torch.Tensor, sp_upper_bound: float):
@@ -2758,6 +2823,26 @@ def observe_heading_obs(state_hist: torch.Tensor, target_tensor: torch.Tensor, s
     tar_sp.clip_(max=sp_upper_bound)
 
     return torch.cat((root_pos, local_tar_dir[..., :2], tar_sp.unsqueeze_(-1)), -1)
+
+@torch.jit.script
+def observe_facing_obs(state_hist: torch.Tensor, facing_tar_dir: torch.Tensor):
+    root_pos = state_hist[-1, :, :3]                                    # [num_envs, 3]         current global_pos!
+    root_orient = state_hist[-1, :, 3:7]        
+    
+    # calculate root_heading
+    UP_AXIS = 2
+    origin = root_pos.clone()                                           # N x 3
+    origin[..., UP_AXIS] = 0     
+    heading = heading_zup(root_orient)                                  # N
+    up_dir = torch.zeros_like(origin)                                   # N x 3
+    up_dir[..., UP_AXIS] = 1
+    
+    heading_orient_inv = axang2quat(up_dir, -heading)                   # N x 4
+    tar_face_dir3d = torch.cat([facing_tar_dir, torch.zeros_like(facing_tar_dir[..., 0:1])], dim=-1)
+    local_tar_face_dir = rotatepoint(heading_orient_inv, tar_face_dir3d)
+    local_tar_face_dir = local_tar_face_dir[..., 0:2]
+    return local_tar_face_dir
+
 
 @torch.jit.script
 def observe_lbody_goal(state_hist: torch.Tensor,
@@ -2889,15 +2974,21 @@ def observe_iccgan_vr(state_hist: torch.Tensor, seq_len: torch.Tensor,
 @torch.jit.script
 def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
     target_tensor: torch.Tensor, timer: torch.Tensor,
-    sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool]
+    sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool], root_coeffs: List[bool]
 ):
     start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3 + int(rlh_coeffs[3]) * 4     # upper body idxs
-    
+    root_start_idx = start_idx + int(root_coeffs[0])*3
+
     sensor_tensor = target_tensor[:, :start_idx]
-    target_tensor = target_tensor[:, start_idx:start_idx+3] # tar_dir_x, tar_dir_y, tar_sp
+    heading_tensor = target_tensor[:, start_idx:start_idx+3] # tar_dir_x, tar_dir_y, tar_sp
+    facing_tensor = target_tensor[:, root_start_idx:root_start_idx+2]
 
     ob = observe_iccgan(state_hist, seq_len)
     ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs)                  # [env_ids, (4 + 4 + 4 + 6)]
-    heading_ob = observe_heading_obs(state_hist, target_tensor, sp_upper_bound)  # [env_ids, 4]
+    heading_ob = observe_heading_obs(state_hist, heading_tensor, sp_upper_bound)  # [env_ids, 4]
+
+    if root_coeffs[1]:
+        facing_ob = observe_facing_obs(state_hist, facing_tensor)  # [env_ids, 4]
+        heading_ob = torch.cat((heading_ob, facing_ob), -1)
 
     return torch.cat((ob, ubody_ob, heading_ob), -1)

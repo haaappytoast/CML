@@ -168,3 +168,15 @@ def tan_norm_to_rotmat(norm_tan):
     
     rot_mat = torch.cat([tan, binorm, norm], dim = len(tan.shape)-1)
     return rot_mat
+
+@torch.jit.script
+def calc_heading_quat(q):
+    # type: (Tensor) -> Tensor
+    # calculate heading rotation from quaternion
+    # the heading is the direction on the xy plane
+    # q must be normalized
+    heading = heading_zup(q)
+    axis = torch.zeros_like(q[..., 0:3])
+    axis[..., 2] = 1
+    heading_q = axang2quat(axis, heading)
+    return heading_q
