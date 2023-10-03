@@ -37,14 +37,14 @@ class SensorInputConfig(object):
     def __init__(self,
               rlh_localPos: Optional[str]=None,  
               rlh_localRot: Optional[str]=None, 
-              xy_pressed: Optional[str]=None):
+              joystick: Optional[str]=None):
         
         self.rlh_localPos = rlh_localPos
         self.rlh_localRot = rlh_localRot
-        self.xy_pressed = xy_pressed
+        self.joystick = joystick
         
 SensorInputProperty = namedtuple("SensorInputProperty",
-    "name rlh_localPos rlh_localRot xy_pressed")
+    "name rlh_localPos rlh_localRot joystick")
 
 class Env(object):
     UP_AXIS = 2
@@ -1675,6 +1675,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # Sensor data config
         for name, sensorconfig in self.sensor_inputs.items():
             print("\n=======\n", name, ": sensor input path well detected", "\n=======\n")
+            if name == "test":
+                self.inference = True
+            else:
+                self.inference = False
+
         rlh_localPos = np.load(os.getcwd() + sensorconfig.rlh_localPos)
         rlh_localpos = torch.tensor(rlh_localPos, dtype=torch.float32)
         r_localpos, l_localpos, h_localpos = rlh_localpos[..., 0:3], rlh_localpos[..., 3:6], rlh_localpos[..., 6:9]
@@ -1866,7 +1871,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         super().update_viewer()
         # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
-        # self.visualize_goal_positions_wrt_curr()
+        self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -2409,14 +2414,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
                 gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
             
-            # lower body
-            for link in lower_key_links:
-                link_pos = ee_pos[i, link]
-                ego_link_pos = self.global_to_ego(self.lbody_goal_root_tensor[:, 0, :3], self.lbody_goal_root_tensor[:, 0, 3:7], link_pos, 2)  
-                glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
+            # # lower body
+            # for link in lower_key_links:
+            #     link_pos = ee_pos[i, link]
+            #     ego_link_pos = self.global_to_ego(self.lbody_goal_root_tensor[:, 0, :3], self.lbody_goal_root_tensor[:, 0, 3:7], link_pos, 2)  
+            #     glob_link_pos = rotatepoint(heading_orient, ego_link_pos)
                 
-                link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
-                gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
+            #     link_pose = gymapi.Transform(gymapi.Vec3(ego_offset_vec[i, 0] + root_pos[i, 0] + glob_link_pos[i, 0], ego_offset_vec[i, 1] +  root_pos[i, 1] + glob_link_pos[i, 1], ego_offset_vec[i, 2] + glob_link_pos[i, 2]), r=None)
+            #     gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], link_pose)    # white
 
 
     def visualize_goal_positions(self):
@@ -2472,7 +2477,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             gymutil.draw_lines(rootsphere_geom, self.gym, self.viewer, self.envs[i], root_pose)
 
 class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
-    GOAL_REWARD_WEIGHT = 0.25, 0.25
+    GOAL_REWARD_WEIGHT = 0.35, 0.15
     GOAL_TENSOR_DIM = 0                            # (3 + 3 + 3) + (4) + (3) rlh ggpositions + h ggquats + root_pos
     GOAL_DIM = 0                                   # (4 + 4 + 4 + 6 + 4)     rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 
@@ -2490,13 +2495,16 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.GOAL_TENSOR_DIM += 3       # global tar_dir (2), global tar_sp (1)
             self.GOAL_DIM += 6              # root_global_pos (3), local tar_dir (2),  local tar_sp (1)
         
-        #! JOYSTICK INPUT (이건 test 시! --> 나중에 필요할 듯)
-        for name, sensorconfig in self.sensor_inputs.items():
-            xy_pressed = np.load(os.getcwd() + sensorconfig.xy_pressed)
-            xy_pressed = torch.tensor(xy_pressed, dtype=torch.float32)
+            # joystick = torch.tensor(joystick, dtype=torch.float32)
 
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
-        
+
+        #! JOYSTICK INPUT
+        for name, sensorconfig in self.sensor_inputs.items():
+            if (self.inference):
+                    self.joystick = torch.load(os.getcwd() + sensorconfig.joystick, map_location=self.device)
+                    print("\n=======\nTEST TIME!\n joystick input: ", self.joystick.shape,  "\n=======\n")
+                    self._enable_rand_heading = False
         pass
 
 
@@ -2529,7 +2537,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.goal_timer -= 1
             env_ids = torch.nonzero(self.goal_timer <= 0).view(-1)
             #! goal_timer가 지났으면 goal reset!
-            if len(env_ids) > 0: 
+            if len(env_ids) > 0 and not self.inference: # TRAIN일 때만
                 self.reset_leg_control_goal(env_ids)
                 self.reset_goal_motion_ids(env_ids)
 
@@ -2545,25 +2553,44 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         all_envs = n_envs == len(self.envs)
         root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
 
-        if (self._enable_rand_heading):
-            rand_theta = 2 * np.pi * torch.rand(n_envs, device=self.device) - np.pi                  #   -pi ~ pi
-        else:
-            rand_theta = torch.zeros(n_envs, device=self.device)
+        if (self.inference):    # test time
+            joystick = self.joystick[self.lifetime % self.joystick.size(0), :] 
+            global_theta = torch.atan2(joystick[..., 1], joystick[..., 0])       # [1]
+            g_tar_dir = torch.stack([torch.cos(global_theta), torch.sin(global_theta), torch.zeros(1, device=self.device)], dim=-1)       # [1, 3]
+            # global2local
+            UP_AXIS = 2
+            heading = heading_zup(self.root_orient)                                              # (num_envs, ) angle
+            up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
+            up_dir[..., UP_AXIS] = 1
+            heading_rot = axang2quat(up_dir, -heading)                                            # N x 4
+            local_tar_dir = rotatepoint(heading_rot, g_tar_dir)                                  # N x 3
+            # print("local_tar_dir.shape: ", local_tar_dir.shape)
+            # print("joystick: ", joystick)
+            # print("g_tar_dir: ", g_tar_dir)
+
+            rand_theta = global_theta
+            tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1, keepdim=True)
+
+        else:                   # train time
+            if (self._enable_rand_heading):
+                rand_theta = 2 * np.pi * torch.rand(n_envs, device=self.device) - np.pi                  #   -pi ~ pi
+            else:
+                rand_theta = torch.zeros(n_envs, device=self.device)
+            
+            # global
+            if self.goal_sp_min == self.goal_sp_max:
+                tar_sp = self.goal_sp_min                                                       # (num_envs, )
+            elif self.goal_sp_std == 0:
+                tar_sp = self.goal_sp_mean
+            else:
+                tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
 
         change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-        
-        # global
         tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
         
-        if self.goal_sp_min == self.goal_sp_max:
-            tar_sp = self.goal_sp_min                                                       # (num_envs, )
-        elif self.goal_sp_std == 0:
-            tar_sp = self.goal_sp_mean
-        else:
-            tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
 
-        self.tar_dir = tar_dir
-        self.tar_sp = tar_sp
+        # self.tar_dir = tar_dir
+        # self.tar_sp = tar_sp
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
 
@@ -2590,12 +2617,21 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         self.reset_leg_control_goal(env_ids)
         pass
 
+    def step(self, actions):
+        obs, rews, dones, info = super().step(actions)
+
+        # inference 일때는, reset_leg_control_goal도 계속 step마다 갱신해줘야함
+        #! start here
+        if self.inference:
+            env_ids = [i for i in range(len(self.envs))]
+            self.reset_leg_control_goal(env_ids)
+
+        return obs, rews, dones, info
     def reward(self):
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
 
         sensor_tensor = self.goal_tensor[:, :start_idx]     
         heading_tensor = self.goal_tensor[:, start_idx:]
-        control_tensor = self.goal_tensor[:, start_idx:]
         
         sensor_rew = super().reward(sensor_tensor)
 
@@ -2615,30 +2651,46 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         n_lines = 10
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
+        # global direction
         tar_dir = self.goal_tensor[:, start_idx:start_idx+2]
         tar_dir = torch.cat((tar_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_dir.device)), -1)     # [N, 3]
-        # # local2global: global_tar_dir
-        # UP_AXIS = 2
-        # heading = heading_zup(self.root_orient)     # (num_envs, ) angle
-        # up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
-        # up_dir[..., UP_AXIS] = 1
-        # heading_rot = axang2quat(up_dir, heading)                                            # N x 4
-        # g_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
-
+        
         tar_x = tar_dir[..., 0].cpu().numpy()
         tar_y = tar_dir[..., 1].cpu().numpy()
         
         tar_sp = self.goal_tensor[:, -1].cpu().numpy()
-
         p = self.root_pos.cpu().numpy()
         zero = np.zeros_like(tar_x)+0.05
 
         lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_x, p[:,1] + tar_y, zero), -1) 
+            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * tar_x, p[:,1] + tar_sp * tar_y, zero), -1) 
             for i in range(n_lines)], -2)
         
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])      # red -> global
+
+        # # global2local: global_tar_dir
+        # UP_AXIS = 2
+        # heading = heading_zup(self.root_orient)     # (num_envs, ) angle
+        # up_dir = torch.zeros_like(self.root_pos)                                             # N x 1 x 3
+        # up_dir[..., UP_AXIS] = 1
+        # heading_rot = axang2quat(up_dir, -heading)                                            # N x 4
+        # local_tar_dir = rotatepoint(heading_rot, tar_dir).cpu().numpy()                          # N x 3
+
+        # tar_x = local_tar_dir[..., 0]
+        # tar_y = local_tar_dir[..., 1]
+        
+        # p = self.root_pos.cpu().numpy()
+        # zero = np.zeros_like(tar_x)+0.05
+
+        # lines = np.stack([
+        #     np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_x, p[:,1] + tar_y, zero), -1) 
+        #     for i in range(n_lines)], -2)
+        
+        # for e, l in zip(self.envs, lines):
+        #     self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue -> local
+
+
 
 @torch.jit.script
 def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, root_rot: torch.Tensor, 

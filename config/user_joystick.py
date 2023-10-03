@@ -33,12 +33,12 @@ sensor_input = {
     "train" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        xy_pressed = "/assets/retargeted/MetaAvatar@control1@xy_pressed.npy"
+        joystick = "/Unity_postprocess/joystick_input/joystick3"
     ),
     "test" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        xy_pressed = "/assets/retargeted/MetaAvatar@control1@xy_pressed.npy"
+        joystick = "/Unity_postprocess/joystick_input/joystick4"
     )
 }
 
