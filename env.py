@@ -1838,12 +1838,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         if env_ids is None:
             return observe_iccgan_vr(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
-                self.goal_tensor, rlh_lpos = self.rlh_lpos, rlh_coeffs=self.rlh_coeffs
+                self.goal_tensor, rlh_lpos = self.rlh_lpos, rlh_coeffs=self.rlh_coeffs,
+                target_root_pos=self.goal_root_tensor[:, 0, :3], target_root_rot=self.goal_root_tensor[:, 0, 3:7]
             )
         else:
             return observe_iccgan_vr(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
-                self.goal_tensor[env_ids], rlh_lpos = self.rlh_lpos, rlh_coeffs=self.rlh_coeffs
+                self.goal_tensor[env_ids], rlh_lpos = self.rlh_lpos, rlh_coeffs=self.rlh_coeffs,
+                target_root_pos=self.goal_root_tensor[env_ids, 0, :3], target_root_rot=self.goal_root_tensor[env_ids, 0, 3:7]
             )
 
     def update_viewer(self):
@@ -1853,7 +1855,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
-        # self.visualize_control_positions(isRef=False)
+        self.visualize_control_positions(isRef=False)
         # self.visualize_hmd_rotations()
         
         # self.visualize_origin()
@@ -2068,7 +2070,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             target_rcontrol_gpos = goal_tensor[..., :3]
             # ego_target_rcontrol_pos = global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
             ego_target_rcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_rcontrol_gpos, 2)
-
             e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1).div_(rarm_len)
             rcontrol_rew = e.mul_(-2).exp_()
         #! 1. end
@@ -2360,7 +2361,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
 
 @torch.jit.script
-def global_to_ego(root_pos, root_orient, ee_pos, up_axis): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
+def global_to_ego(root_pos: torch.Tensor, root_orient: torch.Tensor, ee_pos: torch.Tensor, up_axis: int): # root_pos, root_orient = [n_envs, 3], [n_envs, 4]
     UP_AXIS = up_axis
     origin = root_pos.clone()
     origin[:, UP_AXIS] = 0
@@ -2446,13 +2447,16 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
                 self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, 
-                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs
+                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs,
+                target_root_pos = self.goal_root_tensor[:, 0, :3], target_root_rot = self.goal_root_tensor[:, 0, 3:7]
             )
         else:
             return observe_iccgan_vrcontrol(
                 self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
                 self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, 
-                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs
+                fps=self.fps, rlh_lpos = self.rlh_lpos.to(self.device), rlh_coeffs=self.rlh_coeffs, root_coeffs=self.root_coeffs,
+                target_root_pos=self.goal_root_tensor[env_ids, 0, :3], target_root_rot=self.goal_root_tensor[env_ids, 0, 3:7]
+            
             )
 
     def reset_goal_motion_ids(self, env_ids):
@@ -2781,7 +2785,9 @@ target_tensor: torch.Tensor, rlh_lpos: torch.Tensor):
 
 @torch.jit.script
 def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor, 
-                    rlh_lpos: torch.Tensor, rlh_coeffs: List[bool]):
+                    rlh_lpos: torch.Tensor, rlh_coeffs: List[bool], 
+                    target_root_pos: torch.Tensor, taret_root_rot: torch.Tensor
+                    ):
     root_pos = state_hist[-1, :, :3]            #  (1, NUM_ENVS, disc_obs) root global pos of last frame
     root_orient = state_hist[-1, :, 3:7]        
     
@@ -2805,12 +2811,14 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
         start_idx = 13 + rhand_idx*13
         rhand_pos = state_hist[-1, :, start_idx:start_idx+3]
         rhand_orient = state_hist[-1, :, start_idx+3:start_idx+7]
-        # current rcontrol global position
-        rcontrol_ggpos = rhand_pos + rotatepoint(rhand_orient, r_lpos)                  # [num_envs, 3] + (3, )
-
-        rcontrol_dp = target_tensor[..., :3] - rcontrol_ggpos                       # N x 3
-        # change x,y,z into root orient
-        rcontrol_local_dp = rotatepoint(heading_orient_inv, rcontrol_dp)                                      # N x 3
+        # 1. sim - rcontrol global pos & local pos
+        sim_rcontrol_ggpos = rhand_pos + rotatepoint(rhand_orient, r_lpos)                  # [num_envs, 3] + (3, )
+        sim_rcontrol_lpos = global_to_ego(root_pos, root_orient, sim_rcontrol_ggpos, 2)
+        # 2. ref - rcontrol global pos & local pos
+        ref_rcontrol_ggpos = target_tensor[..., :3]
+        ref_rcontrol_lpos = global_to_ego(target_root_pos, taret_root_rot, ref_rcontrol_ggpos, 2)
+        # 3. local difference
+        rcontrol_local_dp = sim_rcontrol_lpos - ref_rcontrol_lpos
         local_rx, local_ry, local_rz = rcontrol_local_dp[:, 0], rcontrol_local_dp[:, 1], rcontrol_local_dp[:, 2]    # N
 
         rcontrol_dist = (local_rx*local_rx + local_ry*local_ry + local_rz*local_rz).sqrt_()                      # N
@@ -2827,13 +2835,15 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
         lstart_idx = 13 + lhand_idx*13
         lhand_pos = state_hist[-1, :, lstart_idx:lstart_idx+3]
         lhand_orient = state_hist[-1, :, lstart_idx+3:lstart_idx+7]
-        lcontrol_ggpos = lhand_pos + rotatepoint(lhand_orient, l_lpos)                  # [num_envs, 3] + (3, )
-
+        # 1. sim - lcontrol global pos & local pos
+        sim_lcontrol_ggpos = lhand_pos + rotatepoint(lhand_orient, l_lpos)                  # [num_envs, 3] + (3, )
+        sim_lcontrol_lpos = global_to_ego(root_pos, root_orient, sim_lcontrol_ggpos, 2)
+        # 2. ref - lcontrol global pos & local pos
         start_idx = int(rlh_coeffs[0]) * 3
-        lcontrol_dp = target_tensor[..., start_idx + 0 : start_idx + 3] - lcontrol_ggpos                       # N x 3
-
-        # 3. change x,y,z into root orient
-        lcontrol_local_dp = rotatepoint(heading_orient_inv, lcontrol_dp)                                      # N x 3
+        ref_lcontrol_ggpos = target_tensor[..., start_idx + 0 : start_idx + 3]
+        ref_lcontrol_lpos = global_to_ego(target_root_pos, taret_root_rot, ref_lcontrol_ggpos, 2)
+        # 3. local difference
+        lcontrol_local_dp = sim_lcontrol_lpos - ref_lcontrol_lpos
         local_lx, local_ly, local_lz = lcontrol_local_dp[:, 0], lcontrol_local_dp[:, 1], lcontrol_local_dp[:, 2]    # N
 
         lcontrol_dist = (local_lx*local_lx + local_ly*local_ly + local_lz*local_lz).sqrt_()                      # N
@@ -2841,8 +2851,8 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
             ubodygoal_ob = torch.cat((local_lx.unsqueeze(-1), local_ly.unsqueeze(-1), local_lz.unsqueeze(-1), lcontrol_dist.unsqueeze(-1)), -1)  
         else:
             ubodygoal_ob = torch.cat((ubodygoal_ob, local_lx.unsqueeze(-1), local_ly.unsqueeze(-1), local_lz.unsqueeze(-1), lcontrol_dist.unsqueeze(-1)), -1)        
-
     #! end
+
     if ((rlh_coeffs[2]) or (rlh_coeffs[3])):
         head_idx = 2
         hstart_idx = 13 + head_idx*13
@@ -2851,14 +2861,15 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
 
         #! hcontrol position difference w.r.t. root orient 
         if ((rlh_coeffs[2])):
-            hcontrol_ggpos = head_pos + rotatepoint(head_orient, h_lpos)                  # [num_envs, 3] + (3, )
-
-
+            # 1. sim - hcontrol global pos & local pos
+            sim_hcontrol_ggpos = head_pos + rotatepoint(head_orient, h_lpos)                  # [num_envs, 3] + (3, )
+            sim_hcontrol_lpos = global_to_ego(root_pos, root_orient, sim_hcontrol_ggpos, 2)
+            # 2. ref - hcontrol global pos & local pos
             start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1])) * 3
-            hcontrol_dp = target_tensor[..., start_idx + 0 : start_idx + 3] - hcontrol_ggpos                        # N x 3
-            
-            # 3. change x,y,z into root orient
-            hcontrol_local_dp = rotatepoint(heading_orient_inv, hcontrol_dp)                                      # N x 3
+            ref_hcontrol_ggpos = target_tensor[..., start_idx + 0 : start_idx + 3]
+            ref_hcontrol_lpos = global_to_ego(target_root_pos, taret_root_rot, ref_hcontrol_ggpos, 2)
+            # 3. local difference
+            hcontrol_local_dp = sim_hcontrol_lpos - ref_hcontrol_lpos
             local_hx, local_hy, local_hz = hcontrol_local_dp[:, 0], hcontrol_local_dp[:, 1], hcontrol_local_dp[:, 2]    # N
 
             hcontrol_dist = (local_hx*local_hx + local_hy*local_hy + local_hz*local_hz).sqrt_() # N
@@ -2871,11 +2882,9 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
 
         #! hcontrol orientation difference w.r.t. root orient 
         if ((rlh_coeffs[3])):
-
             start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3
-
-            hcontrol_grot = target_tensor[..., start_idx + 0 : start_idx + 4]                                      # [num_envs, 4]
-            diff_grot= quat_mul(quat_inverse(head_orient), hcontrol_grot)
+            ref_hcontrol_grot = target_tensor[..., start_idx + 0 : start_idx + 4]                                      # [num_envs, 4]
+            diff_grot= quat_mul(quat_inverse(head_orient), ref_hcontrol_grot)
             local_hr = quat_mul(heading_orient_inv, diff_grot)
             local_hr_tan_norm = utils.quat_to_tan_norm(local_hr)                          # [num_envs, 6]
             if not (ubodygoal_ob.size(0)):
@@ -2892,20 +2901,20 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
 
 @torch.jit.script
 def observe_iccgan_vr(state_hist: torch.Tensor, seq_len: torch.Tensor,
-    target_tensor: torch.Tensor, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool]
-):
+    target_tensor: torch.Tensor, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool], 
+    target_root_pos: torch.Tensor, target_root_rot: torch.Tensor):
     start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3 + int(rlh_coeffs[3]) * 4
     sensor_tensor = target_tensor[:, :start_idx]
 
     ob = observe_iccgan(state_hist, seq_len)
-    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs)                  # [env_ids, (4 + 4 + 4 + 6)]
+    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs, target_root_pos, target_root_rot)                  # [env_ids, (4 + 4 + 4 + 6)]
     return torch.cat((ob, ubody_ob), -1)
 
 @torch.jit.script
 def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
     target_tensor: torch.Tensor, timer: torch.Tensor,
-    sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool], root_coeffs: List[bool]
-):
+    sp_upper_bound: float, fps: int, rlh_lpos: torch.Tensor, rlh_coeffs: List[bool], root_coeffs: List[bool],
+    target_root_pos: torch.Tensor, target_root_rot: torch.Tensor):
     start_idx = (int(rlh_coeffs[0]) + int(rlh_coeffs[1]) + int(rlh_coeffs[2])) * 3 + int(rlh_coeffs[3]) * 4     # upper body idxs
     root_start_idx = start_idx + int(root_coeffs[0])*3
 
@@ -2914,7 +2923,7 @@ def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
     facing_tensor = target_tensor[:, root_start_idx:root_start_idx+2]
 
     ob = observe_iccgan(state_hist, seq_len)
-    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs)                  # [env_ids, (4 + 4 + 4 + 6)]
+    ubody_ob = observe_ubody_goal(state_hist, sensor_tensor, rlh_lpos, rlh_coeffs, target_root_pos, target_root_rot)                  # [env_ids, (4 + 4 + 4 + 6)]
     heading_ob = observe_heading_obs(state_hist, heading_tensor, sp_upper_bound)  # [env_ids, 4]
 
     if root_coeffs[1]:
