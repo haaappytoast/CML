@@ -1320,27 +1320,6 @@ class ICCGANHumanoidEE(ICCGANHumanoid):
         super().update_viewer()
         self.gym.clear_lines(self.viewer)
 
-        # #! what I added for ee position
-        # # 1. rhand visualization
-        # link_pos = self.link_pos
-        # r_end = self.goal_tensor[:, 0:3].cpu().numpy()
-
-        # for i in range(len(self.envs)):
-        #     rsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(1, 0, 0))   # red
-        #     rhand_pos = r_end[i]
-        #     rhand_pose = gymapi.Transform(gymapi.Vec3(rhand_pos[0], rhand_pos[1], rhand_pos[2]), r=None)
-        #     gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
-        # #!
-
-        # # 2. lhand visualization
-        # l_end = self.ltemp.cpu().numpy()
-
-        # for i in range(len(self.envs)):
-        #     lsphere_geom = gymutil.WireframeSphereGeometry(0.04, 16, 16, None, color=(0, 1, 0))   # green
-        #     lhand_pos = l_end[i]
-        #     lhand_pose = gymapi.Transform(gymapi.Vec3(lhand_pos[0], lhand_pos[1], lhand_pos[2]), r=None)
-        #     gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)   
-        # #!
 
     def _observe(self, env_ids):
         if env_ids is None:
@@ -1869,7 +1848,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
     def update_viewer(self):
         super().update_viewer()
-        # self.gym.clear_lines(self.viewer)
         # self.visualize_ee_positions()
         self.visualize_goal_positions_wrt_curr()
         
@@ -2568,7 +2546,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             rand_theta = global_theta
             tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1, keepdim=True)
             #! need to change later facing!
-            rand_face_theta = torch.zeros(n_envs, device=self.device)
+            rand_face_theta = global_theta
 
         # train time
         else:                   
@@ -2666,7 +2644,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     # visualize target heading direction & simulated character heading direction
     def visualize_heading_dir(self):
         n_lines = 10
-        
         if self.root_coeffs[0]:
             start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
             # global direction
@@ -2676,7 +2653,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             tar_x = tar_dir[..., 0].cpu().numpy()
             tar_y = tar_dir[..., 1].cpu().numpy()
             
-            tar_sp = self.goal_tensor[:, -1].cpu().numpy()
+            tar_sp = self.goal_tensor[:, start_idx+2].cpu().numpy()
             p = self.root_pos.cpu().numpy()
             zero = np.zeros_like(tar_x)+0.05
 
@@ -2721,15 +2698,15 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             tar_face_x = tar_face_dir[..., 0].cpu().numpy()
             tar_face_y = tar_face_dir[..., 1].cpu().numpy()
             
-            tar_sp = self.goal_tensor[:, -1].cpu().numpy()
+            tar_sp = self.goal_tensor[:, start_idx+2].cpu().numpy()
             p = self.root_pos.cpu().numpy()
             zero = np.zeros_like(tar_face_x)+0.05
 
-            lines = np.stack([
+            tar_lines = np.stack([
                 np.stack((p[:,0], p[:,1], p[:,2]+0.01*i, p[:,0] + tar_sp * tar_face_x, p[:,1] + tar_sp * tar_face_y, p[:,2]), -1) 
                 for i in range(n_lines)], -2)
-            
-            for e, l in zip(self.envs, lines):
+        
+            for e, l in zip(self.envs, tar_lines):
                 self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 1., 1.] for _ in range(n_lines)])      # red -> global
 
         # sim character's facing direction #! --> 이후에 smoothed direction으로??
@@ -2749,8 +2726,11 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
 
     def update_viewer(self):
         super().update_viewer()
+
         self.visualize_heading_dir()
         self.visualize_facing_dir()
+        
+
 
 
 @torch.jit.script
@@ -2794,7 +2774,9 @@ def compute_facing_reward(root_pos: torch.Tensor, root_rot: torch.Tensor, tar_fa
     heading_rot = calc_heading_quat(root_rot)
     facing_dir = torch.zeros_like(root_pos)
     facing_dir[..., 0] = 1.0
-    facing_dir = rotatepoint(heading_rot, facing_dir)
+    facing_dir = rotatepoint(heading_rot, facing_dir)   # simulated character's facing dir
+    
+    # 내적한 값이 1에 가까울수록 facing direction이 같은것!
     facing_err = torch.sum(tar_face_dir * facing_dir[..., 0:2], dim=-1)
     facing_reward = torch.clamp_min(facing_err, 0.0)
     return facing_reward
