@@ -855,12 +855,17 @@ class HumanoidView(ICCGANHumanoid):
 
 
     def update_viewer(self):
-        super().update_viewer()
         self.gym.clear_lines(self.viewer)
-
+        
+        self._motion_sync()
+        # self.gym.fetch_results(self.sim, True)
+        self.visualize_ref_positions()
         self.visualize_ee_positions()
         self.temporary()
+        self.refresh_tensors()
         self.visualize_axis(self.link_pos[:,[2, 5, 8], :], self.link_orient[:,[2, 5, 8], :], scale = 0.2, y=True, z =True)
+        super().update_viewer()
+
     #! here no forces applied
     def apply_actions(self, actions):
         actions = self.process_actions(actions)
@@ -869,7 +874,7 @@ class HumanoidView(ICCGANHumanoid):
         force_tensor = gymtorch.unwrap_tensor(forces)
         self.gym.set_dof_actuation_force_tensor(self.sim, force_tensor)
 
-    def step(self, actions):
+    def step(self, actions):    # do_simulation -> motion_sync -> update_viewer 
         self.state_hist[:-1] = self.state_hist[1:].clone()
 
         ### Env step
@@ -877,8 +882,7 @@ class HumanoidView(ICCGANHumanoid):
         ### Env step END
         info["disc_obs"] = self.observe_disc(self.state_hist)
         info["disc_obs_expert"], info["disc_seq_len"] = self.fetch_real_samples()
-
-        self._motion_sync()
+        
         return obs, rews, dones, info
 
     def init_state(self, env_ids):
@@ -912,7 +916,7 @@ class HumanoidView(ICCGANHumanoid):
 
         n_links = self.gym.get_actor_rigid_body_count(self.envs[0], 0)
         self.root_tensor[env_ids] = self._ref_root_tensor
-        self.link_tensor[env_ids] = self._ref_link_tensor
+        # self.link_tensor[env_ids] = self._ref_link_tensor
         self.joint_tensor[env_ids] = self._ref_joint_tensor
 
         # if self.link_tensor.size(1) > n_links:  
@@ -932,6 +936,35 @@ class HumanoidView(ICCGANHumanoid):
             gymtorch.unwrap_tensor(self.joint_tensor),
             actor_ids, n_actor_ids
         )
+    def visualize_ref_positions(self):
+        num_links = self.gym.get_env_rigid_body_count(self.envs[0])
+        
+        link_i = [i for i in range(num_links)]
+        n_inst = len(self.envs)
+        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
+            if "upper" in discs[0].name or "full" in discs[0].name:
+                dt = self.step_time
+                if replay_speed is not None:
+                    dt /= replay_speed(n_inst)
+                
+                # 처음 시작 
+                motion_ids, motion_times0 = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
+                if self.RANDOM_INIT:
+                    motion_times0 = self.motion_times + self.lifetime * dt
+                else:
+                    motion_times0 = self.lifetime * dt
+                motion_times0 = motion_times0.cpu().numpy()
+                _, self._ref_link_tensor, _ = ref_motion.state(motion_ids, motion_times0)
+                
+        joint_poses = self._ref_link_tensor[:, link_i, :]
+
+        for i in range(len(self.envs)):
+            joint_sphere_geom = gymutil.WireframeSphereGeometry(0.07, 16, 16, None, color=(0, 0, 1))
+            for jointIdx in range(num_links):
+                joint_pos = joint_poses[i, jointIdx]
+
+                joint_pose = gymapi.Transform(gymapi.Vec3(joint_pos[0], joint_pos[1], joint_pos[2]), r=None)
+                gymutil.draw_lines(joint_sphere_geom, self.gym, self.viewer, self.envs[i], joint_pose)   
 
     def visualize_ee_positions(self):
         ee_links = [2, 5, 8]    # head, right hand, lefthand
