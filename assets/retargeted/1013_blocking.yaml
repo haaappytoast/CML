@@ -1,0 +1,25 @@
+motions:
+- file: 1013_blocking/cml@Blocking1.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking1_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking2.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking2_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@BodyBlock.npy
+  weight: null
+- file: 1013_blocking/cml@BodyBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@InwardBlock.npy
+  weight: null
+- file: 1013_blocking/cml@InwardBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@OutwardBlock.npy
+  weight: null
+- file: 1013_blocking/cml@OutwardBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@ybot_vis@StandingBlockIdle.npy
+  weight: null
+- file: 1013_blocking/cml@ybot_vis@StandingBlockIdle_mirrored.npy
+  weight: null
