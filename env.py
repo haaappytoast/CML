@@ -1973,14 +1973,17 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         ee_links = [5, 8, 2]  # right hand, left hand, head, 
         ee_pos = self.goal_link_pos[:, ee_links, :]      # [n_envs, n_ee_link, 3]
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
-
+        
+        r_lpos = self.r_lpos.unsqueeze(0).repeat(n_envs, 1)
+        l_lpos = self.l_lpos.unsqueeze(0).repeat(n_envs, 1)
+        h_lpos = self.h_lpos.unsqueeze(0).repeat(n_envs, 1)
         #! control ggposition
-        rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
-        lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
-        hmd_ggpos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
+        rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
+        hmd_ggpos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
 
         # rotation (#!300 should be changed with respect to the motion clip)
-        hmd_lrot = self.h_lrot[self.lifetime % 300]                     # [num_envs, 4]
+        hmd_lrot = self.h_lrot.to(self.device)[self.lifetime % 300]                     # [num_envs, 4]
         hmd_ggrot = quat_mul(ee_rot[:, 2], hmd_lrot.to(self.device))                     # [num_envs, 4]
 
         #! rcontrol global position
@@ -2058,12 +2061,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         rcontrol_rew, lcontrol_rew, hmd_pos_e_rew, hmd_rot_e_rew = \
             torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device), torch.zeros(len(self.envs), device=self.device)
-
+        
+        num_envs = self.link_orient.size(0)
         #! 1. rcontrol reward
         # current rcontrol
         if (self.rpos_coeff != 0):
             rhand_pos = self.link_pos[:, self.r_hand_link]
-            rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos.to(self.device))  
+            r_lpos = self.r_lpos.unsqueeze(0).repeat(num_envs, 1)
+            rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], r_lpos.to(self.device))  
             ego_rcontrol_pos = global_to_ego(self.root_pos, self.root_orient, rcontrol_pos, 2)
 
             # target_rcontrol_gpos (this goal_tensor is from previous lifetime goal_tensor) 
@@ -2078,7 +2083,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         if (self.lpos_coeff != 0):
             # current lcontrol
             lhand_pos = self.link_pos[:, self.l_hand_link]
-            lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos.to(self.device))
+            l_lpos = self.l_lpos.unsqueeze(0).repeat(num_envs, 1)
+            lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], l_lpos.to(self.device))
             ego_lcontrol_pos = global_to_ego(self.root_pos, self.root_orient, lcontrol_pos, 2)
 
             # target_lcontrol_gpos
@@ -2106,7 +2112,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             # current hmd pos
             head_pos = self.link_pos[:, self.head]
-            hmd_pos = head_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos.to(self.device))
+            h_lpos = self.h_lpos.unsqueeze(0).repeat(num_envs, 1)
+            hmd_pos = head_pos + rotatepoint(self.link_orient[:, self.head], h_lpos.to(self.device))
             ego_hmd_pos = global_to_ego(self.root_pos, self.root_orient, hmd_pos, 2)
 
             # target_hmd_gpos
@@ -2230,10 +2237,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         goal_root_pos = self.goal_root_tensor[:, 0, :3]
         goal_root_rot = self.goal_root_tensor[:, 0, 3:7]   # [num_envs, 3, 4]
+        n_envs = goal_root_rot.size(0)
+        r_lpos = self.r_lpos.unsqueeze(0).repeat(n_envs, 1)
+        l_lpos = self.l_lpos.unsqueeze(0).repeat(n_envs, 1)
+        h_lpos = self.h_lpos.unsqueeze(0).repeat(n_envs, 1)
         
-        hmd_pos      = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))
-        rcontrol_pos = ee_pos[:, 5] + rotatepoint(ee_rot[:, 5], self.r_lpos.to(self.device))
-        lcontrol_pos = ee_pos[:, 8] + rotatepoint(ee_rot[:, 8], self.l_lpos.to(self.device))
+        hmd_pos      = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], h_lpos.to(self.device))
+        rcontrol_pos = ee_pos[:, 5] + rotatepoint(ee_rot[:, 5], r_lpos.to(self.device))
+        lcontrol_pos = ee_pos[:, 8] + rotatepoint(ee_rot[:, 8], l_lpos.to(self.device))
 
         ego_hmd_pos = global_to_ego(goal_root_pos, goal_root_rot, hmd_pos, 2)  # [num_envs, 3]
         ego_rcontrol_pos = global_to_ego(goal_root_pos, goal_root_rot, rcontrol_pos, 2)  # [num_envs, 3]
@@ -2259,7 +2270,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             # 지금 character가 향하고 있는 방향에 대해서 (offset, 0, 0) 만큼 떨어져서 visualize 되도록
             offset = -0.7
             offset_vec = torch.tensor([0, offset, 0], dtype=torch.float32, device=self.device)
-            ego_offset_vec = rotatepoint(heading_orient, offset_vec)
+            ego_offset_vec = rotatepoint(heading_orient, offset_vec.unsqueeze(0))
 
             hmd_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_hmd_pos[i, 0], ego_offset_vec[0, 1] + root_pos[i, 1] + glob_hmd_pos[i, 1], ego_offset_vec[0, 2] + glob_hmd_pos[i, 2]), r=None)
             rcontrol_pos = gymapi.Transform(gymapi.Vec3(ego_offset_vec[0, 0] + root_pos[i, 0] + glob_rcontrol_pos[i, 0], ego_offset_vec[0, 1] + root_pos[i, 1] + glob_rcontrol_pos[i, 1], ego_offset_vec[0, 2] + glob_rcontrol_pos[i, 2]), r=None)
@@ -2790,7 +2801,8 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
                     ):
     root_pos = state_hist[-1, :, :3]            #  (1, NUM_ENVS, disc_obs) root global pos of last frame
     root_orient = state_hist[-1, :, 3:7]        
-    
+    num_envs = root_pos.size(0)
+    rlh_lpos = rlh_lpos.unsqueeze_(1).repeat(1, num_envs, 1)
     r_lpos, l_lpos, h_lpos = rlh_lpos[0].to(device=state_hist.device), rlh_lpos[1].to(device=state_hist.device), rlh_lpos[2].to(device=state_hist.device)
 
     # calculate root_heading
