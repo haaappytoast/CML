@@ -1700,13 +1700,10 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def step(self, actions):
         # goal visualize
         env_ids = list(range(len(self.envs)))
-        self.goal_change_timer -= 1
-        env_ids = torch.nonzero(self.goal_change_timer <= 0).view(-1)
-        if len(env_ids) > 0 and not self.inference: # TRAIN일 때만
-            self._motion_sync()
-            self.reset_goal(env_ids, goal_timer=self.goal_change_timer)
-            self.goal_change_timer[env_ids] = self.goal_change_timestep * torch.ones((len(env_ids)), dtype=torch.int32, device=self.device)
+        self._motion_sync()
 
+        print(self.goal_tensor[:5, 0])
+        
         # check overtime of goal_motion_time
         if self.viewer is not None: 
             up_over_env_ids, up_in_env_ids, up_key_links, l_over_env_ids, l_in_env_ids, l_key_links = self.goal_motion_overtime_check()
@@ -2147,6 +2144,19 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                     + self.hpos_coeff * hmd_pos_e_rew + self.hrot_coeff * hmd_rot_e_rew) 
         return total_r.unsqueeze_(-1)
     
+    def overtime_check(self):
+        self.goal_change_timer -= 1
+        env_ids = torch.nonzero(self.goal_change_timer <= 0).view(-1)
+        if len(env_ids) > 0 and not self.inference: # TRAIN일 때만
+            self.reset_goal(env_ids, goal_timer=self.goal_change_timer)
+            self.goal_change_timer[env_ids] = self.goal_change_timestep * torch.ones((len(env_ids)), dtype=torch.int32, device=self.device)
+        
+        if self.episode_length:
+            if callable(self.episode_length):
+                return self.lifetime >= self.episode_length(self.simulation_step)
+            return self.lifetime >= self.episode_length
+        return None
+        
     def visualize_origin(self):
         pose = gymapi.Transform()
         pose.p = gymapi.Vec3(0.0, 1.0, 0.0)
@@ -2493,13 +2503,9 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             if len(env_ids) > 0 and not self.inference: # TRAIN일 때만
                 self.reset_leg_control_goal(env_ids)
                 self.reset_goal_motion_ids(env_ids)
-
-        if self.episode_length:
-            if callable(self.episode_length):
-                return self.lifetime >= self.episode_length(self.simulation_step)
-            return self.lifetime >= self.episode_length
-        return None
-
+        
+        super().overtime_check()
+        
     #! for train
     def reset_leg_control_goal(self, env_ids):
         n_envs = len(env_ids)
