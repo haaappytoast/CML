@@ -2418,7 +2418,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     GOAL_REWARD_WEIGHT = 0.35, 0.15
     GOAL_TENSOR_DIM = 0                            # (3 + 3 + 3) + (4) + (3) rlh ggpositions + h ggquats + root_pos
     GOAL_DIM = 0                                   # (4 + 4 + 4 + 6 + 4)     rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
-
+    GOAL_CHANGE_FREQ = 30
     HEADING_COEFF = 0
     FACING_COEFF = 0
 
@@ -2430,6 +2430,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         self.facing_coeff = parse_kwarg(kwargs, "facing", self.FACING_COEFF)
         self._enable_rand_heading = parse_kwarg(kwargs, "enableRandomHeading", self.ENABLE_RANDOM_HEADING) #! training 시 random_heading 필요
         self.sensor_inputs = sensor_inputs
+        self.goal_change_timestep = int(30/parse_kwarg(kwargs, "goal_change_freq", self.GOAL_CHANGE_FREQ))
         
         self.root_coeffs = [False] * 2
         if (self.heading_coeff != 0):
@@ -2530,7 +2531,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
                 tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
 
 
-        change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
+        change_steps_timer = self.goal_change_timestep * torch.ones((n_envs,), dtype=self.goal_timer.dtype, device=self.device)        
         tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
         face_tar_dir = torch.stack([torch.cos(rand_face_theta), torch.sin(rand_face_theta)], dim=-1)
 

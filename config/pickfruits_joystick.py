@@ -8,6 +8,7 @@ env_params = dict(
     sp_lower_bound = 0.9,
     sp_upper_bound = 1.2,
     goal_timer_range = (90, 150),
+    goal_change_freq = 6,
     goal_sp_mean = 1.,
     goal_sp_std = 0.25,
     goal_sp_min = 0,
