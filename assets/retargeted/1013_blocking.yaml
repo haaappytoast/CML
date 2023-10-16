@@ -19,7 +19,7 @@ motions:
   weight: null
 - file: 1013_blocking/cml@OutwardBlock_mirrored.npy
   weight: null
-- file: 1013_blocking/cml@ybot_vis@StandingBlockIdle.npy
+- file: 1013_blocking/cml@StandingBlockIdle.npy
   weight: null
-- file: 1013_blocking/cml@ybot_vis@StandingBlockIdle_mirrored.npy
+- file: 1013_blocking/cml@StandingBlockIdle_mirrored.npy
   weight: null
