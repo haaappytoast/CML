@@ -2404,7 +2404,7 @@ def global_to_ego_wrt_root(root_pos, root_orient, ee_pos, up_axis): # root_pos, 
 
 
 class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
-    GOAL_REWARD_WEIGHT = 0.35, 0.15
+    GOAL_REWARD_WEIGHT = 0.4, 0.2
     GOAL_TENSOR_DIM = 0                            # (3 + 3 + 3) + (4) + (3) rlh ggpositions + h ggquats + root_pos
     GOAL_DIM = 0                                   # (4 + 4 + 4 + 6 + 4)     rlh's (local_x, local_y, local_z, dist), tan_norm of hrot, root_pos
 

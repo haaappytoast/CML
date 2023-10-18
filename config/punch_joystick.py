@@ -49,11 +49,11 @@ discriminators = {
         parent_link = "pelvis",
         ob_horizon = 3,
         local_pos = True,
-        weight=0.3
+        weight=0.25
     ),
     "walk/lower": dict(
         key_links = ["pelvis", "right_thigh", "right_shin", "right_foot", "left_thigh", "left_shin", "left_foot"],
         parent_link = None,
-        weight=0.2
+        weight=0.15
     )
 }
