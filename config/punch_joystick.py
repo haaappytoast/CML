@@ -1,6 +1,5 @@
 import numpy as np
-# python main.py config/blocking_joystick.py --ckpt 1013_blocking_joystick --headless --server carefree
-env_cls = "ICCGANHumanoidVRControl"
+# python main.py config/punch_joystick.py --ckpt 1018_punch_joystickenv_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
     motion_file = "assets/motions/clips_walk.yaml",    # lower part
