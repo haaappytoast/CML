@@ -533,7 +533,7 @@ if __name__ == "__main__":
         if "view" in (config.env_cls).lower():
             pass
         else:
-            env.episode_length = 200
+            env.episode_length = 300
 
     value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
     model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)
@@ -589,5 +589,5 @@ if __name__ == "__main__":
                 raise ValueError("Please correctly type checkpoint path to resume training")
 
         else:
-            env.render()
+            #env.render()
             train(env, model, settings.ckpt, training_params, reward_coeff)

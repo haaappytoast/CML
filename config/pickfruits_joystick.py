@@ -39,13 +39,15 @@ sensor_input = {
     "test" : dict(
         rlh_localPos = "/assets/retargeted/pickfuits_joystick0@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/pickfuits_joystick0@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/1016_joystick/joystick_pickfruits1"
+        # joystick = "/Unity_postprocess/joystick_input/1016_joystick/joystick_pickfruits1"
+        joystick = "/Unity_postprocess/joystick_input/joystick3"
+    
     )
 }
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1016_test/cml@1016pickfruits2.npy",
+        motion_file = "assets/retargeted/test/1016_test/cml@1016pickfruits3.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,

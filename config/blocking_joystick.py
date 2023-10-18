@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/blocking_joystick.py --ckpt 1013_blocking_joystick --headless --server carefree
+# python main.py config/blocking_joystick.py --ckpt 1018_blocking_joystick --headless --server carefree
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -39,13 +39,13 @@ sensor_input = {
     "test" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/joystick4"
+        joystick = "/Unity_postprocess/joystick_input/joystick1"
     )
 }
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1013_blocking.yaml",
+        motion_file = "assets/retargeted/1018_blocking.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
@@ -58,3 +58,8 @@ discriminators = {
         weight=0.2
     )
 }
+
+# cml@StandingBlockIdle.npy OK --> 너무 잘 학습해버림!
+# cml@Blocking1_mirrored.npy OK
+# cml@Blocking1.npy NOT OK
+# cml@BodyBlock.npy

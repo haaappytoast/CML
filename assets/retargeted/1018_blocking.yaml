@@ -1,0 +1,7 @@
+motions:
+- file: 1018_blocking/cml@Blocking1.npy
+  weight: null
+- file: 1018_blocking/cml@Blocking2.npy
+  weight: null
+- file: 1018_blocking/cml@Blocking3.npy
+  weight: null
