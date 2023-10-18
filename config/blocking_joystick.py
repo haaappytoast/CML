@@ -46,6 +46,7 @@ sensor_input = {
 discriminators = {
     "usermotion1/upper": dict(
         motion_file = "assets/retargeted/1018_blocking.yaml",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@inwardrightblock.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
