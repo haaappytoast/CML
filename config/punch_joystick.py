@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/pickfruits_joystick.py --ckpt temp 
+# python main.py config/blocking_joystick.py --ckpt 1013_blocking_joystick --headless --server carefree
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -17,7 +17,7 @@ env_params = dict(
 
 training_params = dict(
     max_epochs = 30000,
-    save_interval = 300,
+    save_interval = 1000,
     terminate_reward = -1
 )
 
@@ -37,15 +37,15 @@ sensor_input = {
         joystick = "/Unity_postprocess/joystick_input/joystick3"
     ),
     "test" : dict(
-        rlh_localPos = "/assets/retargeted/pickfuits_joystick0@rlh_localPos.npy",
-        rlh_localRot = "/assets/retargeted/pickfuits_joystick0@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/1016_joystick/joystick_pickfruits1"
+        rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
+        rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
+        joystick = "/Unity_postprocess/joystick_input/joystick4"
     )
 }
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1016_test/cml@1016pickfruits2.npy",
+        motion_file = "assets/retargeted/1018_punch.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
