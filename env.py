@@ -1639,6 +1639,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     HPOS_COEFF = 0.25
     HROT_COEFF = 0.25
     
+    GOAL_TERMINATION = True
     def __init__(self, *args, 
                  sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
@@ -1647,6 +1648,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.lpos_coeff = parse_kwarg(kwargs, "lhand_pos", self.LPOS_COEFF)
         self.hpos_coeff = parse_kwarg(kwargs, "hmd_pos", self.HPOS_COEFF)
         self.hrot_coeff = parse_kwarg(kwargs, "hmd_rot", self.HROT_COEFF)
+        self.goal_termination = parse_kwarg(kwargs, "goal_termination", self.HROT_COEFF)
 
         self.sensor_inputs = sensor_inputs
         self.upper, self.lower, self.full = False, False, False
@@ -1795,6 +1797,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         else:
             self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
             self.goal_char_joint_tensor = self.goal_joint_tensor
+        self.control_errors = torch.zeros([len(self.envs), 4], dtype=torch.float32, device=self.device)
+        self.track_terminate_time = torch.zeros((len(self.envs), ), dtype=torch.float32, device=self.device)
 
 
     def init_state(self, env_ids):
@@ -1936,6 +1940,44 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         self.lbody_goal_root_tensor[env_ids] = other_root_tensor
 
+    def goal_terminate(self, terminate):
+        # terminate condition 2 goal position에 유지하지 못하면
+        # goal에서 너무 멀면 terminate 조건에 성립       
+        r_too_far = torch.any(self.control_errors[..., 0:3] > 0.2, dim=1)
+        r_too_far = self.control_errors[..., 0:3] > 0.2
+        # r_too_far이면 counter을 하나 증가시켜준다
+        increse_env = (r_too_far == True).nonzero()
+        reset_env = (r_too_far == False).nonzero().view(-1)     # 잘 따라갔으면 counter 0
+        self.track_terminate_time[increse_env] += 1
+        self.track_terminate_time[reset_env] = 0
+        
+        continuous_fail = self.track_terminate_time > 30        # 30번을 연속으로 너무 멀면
+
+        term_final = torch.logical_or(continuous_fail, terminate)
+        # terminate_time 초기화
+        reset_time_env = (term_final == True).nonzero().view(-1)
+        self.track_terminate_time[reset_time_env] = 0
+        return term_final
+
+
+    def termination_check(self):
+        if self.contactable_links is None:
+            return torch.zeros_like(self.done)
+        masked_contact = self.char_contact_force_tensor.clone()
+        masked_contact[self.contactable_links] = 0          # N x n_links x 3
+
+        contacted = torch.any(masked_contact > 1., dim=-1)  # N x n_links
+        too_low = self.link_pos[..., self.UP_AXIS] < 0.15    # N x n_links
+
+        terminate = torch.any(torch.logical_and(contacted, too_low), -1)    # N x
+        terminate *= (self.lifetime > 1)
+        term_final = terminate
+        
+        # goal에 대한 termination 주었을 때 (ablation study를 위해 추가!)
+        if not self.inference and self.goal_termination:
+            term_final = self.goal_terminate(terminate)
+        
+        return term_final
 
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
@@ -2072,6 +2114,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ego_target_rcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_rcontrol_gpos, 2)
             e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1).div_(rarm_len)
             rcontrol_rew = e.mul_(-2).exp_()
+
+            self.control_errors[..., 0] = e
         #! 1. end
 
         #! 2. lcontrol reward
@@ -2088,6 +2132,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1).div_(larm_len)
             lcontrol_rew = l_e.mul_(-2).exp_()
+
+            self.control_errors[..., 1] = l_e
         #! 2. end
 
         root_pos, root_orient = self.root_pos, self.root_orient
@@ -2115,6 +2161,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             hmd_e = torch.linalg.norm(ego_target_hmd_pos.sub(ego_hmd_pos), ord=2, dim=-1)
             hmd_pos_e_rew = hmd_e.mul_(-3).exp_()
+
+            self.control_errors[..., 2] = hmd_e
         #! 3. end
 
         #! 4. hmd ORIENTATION reward
@@ -2128,7 +2176,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             hmd_rot_e = torch.linalg.norm(ego_diffrot, ord=2, dim=-1)
             hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
-
+            
+            self.control_errors[..., 3] = hmd_rot_e
         #! 4. end
         total_r = (self.rpos_coeff * rcontrol_rew + self.lpos_coeff * lcontrol_rew \
                     + self.hpos_coeff * hmd_pos_e_rew + self.hrot_coeff * hmd_rot_e_rew) 
@@ -2491,12 +2540,12 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
         # test time
         if (self.inference):
-            joystick = self.joystick[self.lifetime % self.joystick.size(0), :] 
+            joystick = self.joystick[self.lifetime[env_ids] % self.joystick.size(0), :] 
             global_theta = torch.atan2(joystick[..., 1], joystick[..., 0])       # [1]
-            g_tar_dir = torch.stack([torch.cos(global_theta), torch.sin(global_theta), torch.zeros(1, device=self.device)], dim=-1)       # [1, 3]
+            g_tar_dir = torch.stack([torch.cos(global_theta), torch.sin(global_theta), torch.zeros((len(env_ids), ), device=self.device)], dim=-1)       # [1, 3]
 
             rand_theta = global_theta
-            tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1, keepdim=True)
+            tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1)
             #! need to change later facing!
             rand_face_theta = global_theta
 
@@ -2517,7 +2566,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
                 tar_sp = self.goal_sp_mean
             else:
                 tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
-
 
         change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
         tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]

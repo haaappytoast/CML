@@ -75,9 +75,9 @@ def logger(obs, rews, info):
     
     multi_critics = env.reward_weights is not None
     if multi_critics:
-        rewards = torch.zeros(1, len(env.discriminators)+env.rew_dim)                      # [num_envs X 8, reward 개수]
+        rewards = torch.zeros(num_envs, len(env.discriminators)+env.rew_dim)                      # [num_envs X 8, reward 개수]
     else:
-        rewards = torch.zeros(1, len(env.discriminators))
+        rewards = torch.zeros(num_envs, len(env.discriminators))
     
     fakes = info["disc_obs"]
     disc_seq_len = info["disc_seq_len"]
@@ -113,17 +113,15 @@ def logger(obs, rews, info):
         
         else:
             rewards_task = None
-            
-        rewards = rewards.mean(0).cpu().tolist()                                        # [num_reward]
-        print("Reward: {}".format("/".join(list(map("{:.4f}".format, rewards)))))
-    return rewards
+        print("Reward: {}".format("/".join(list(map("{:.4f}".format, rewards.mean(0).cpu().tolist()  )))))  # 모든 env에서의 mean값
+    return rewards.sum(dim=1)      # 각 env에 대한 reward 값
 
 
 def test(env, model):
     model.eval()
     env.reset()
-    rewards_tot = 0
-    count = 0
+    rewards_tot = torch.zeros((num_envs,), dtype=torch.float64)                   # 4개의 env
+    counter = torch.zeros((num_envs,), dtype=torch.int32)
     while not env.request_quit:
         obs, info = env.reset_done()
         seq_len = info["ob_seq_lens"]
@@ -132,14 +130,15 @@ def test(env, model):
 
         reward = logger(obs, rews, info)
         
-        if info["terminate"].item() is False:
-            rewards_tot += reward[0]
-            count +=1
-        else:
-            rewards_tot += reward[0]
-            print("\n------\nLength: {:d}, avg episode reward: {:.4f}\n-----".format(count, rewards_tot/count))
-            rewards_tot = 0
-            count = 0
+        rewards_tot += reward
+        counter += torch.where(info["terminate"] == False, 1, 0).cpu()  # counter 더해주기
+        # terminate 되었다면
+        terminated_env = (info["terminate"] == True).nonzero().view(-1).cpu()
+        # terminate 된 env가 있다면
+        if len(terminated_env):
+            for e in terminated_env:
+                print("ENV {:d} / avg reward: {:.4f} / total return: {:.4f}".format(e, rewards_tot[e] / counter[e].item(), rewards_tot[e]))
+            counter[terminated_env] = torch.zeros_like(terminated_env, dtype=torch.int32)   # counter는 0dmfh gownjdigka!
 
 def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_optimizer=None):
     if ckpt_dir is not None:
@@ -448,7 +447,7 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
 
 if __name__ == "__main__":
     if settings.test:
-        num_envs = 1
+        num_envs = 3
     else:
         num_envs = NUM_ENVS
         if settings.ckpt:
