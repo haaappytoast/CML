@@ -13,11 +13,12 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True
+    goal_termination = True
 )
 
 training_params = dict(
     max_epochs = 30000,
-    save_interval = 300,
+    save_interval = 1000,
     terminate_reward = -1
 )
 
