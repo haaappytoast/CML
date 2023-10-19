@@ -1944,7 +1944,6 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # terminate condition 2 goal position에 유지하지 못하면
         # goal에서 너무 멀면 terminate 조건에 성립       
         r_too_far = torch.any(self.control_errors[..., 0:3] > 0.2, dim=1)
-        r_too_far = self.control_errors[..., 0:3] > 0.2
         # r_too_far이면 counter을 하나 증가시켜준다
         increse_env = (r_too_far == True).nonzero()
         reset_env = (r_too_far == False).nonzero().view(-1)     # 잘 따라갔으면 counter 0
