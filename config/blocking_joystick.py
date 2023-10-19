@@ -17,7 +17,7 @@ env_params = dict(
 
 training_params = dict(
     max_epochs = 30000,
-    save_interval = 300,
+    save_interval = 1000,
     terminate_reward = -1
 )
 
@@ -45,13 +45,19 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1018_blocking.yaml",
-        # motion_file = "assets/retargeted/test/blocking_test/cml@inwardrightblock.npy",
+        # train
+        motion_file = "assets/retargeted/1019_blocking.yaml",
+        # test
+        # motion_file = "assets/retargeted/test/blocking_test/cml@jointInfo0.npy",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@blocking1.npy",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@blocking2.npy",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
         local_pos = True,
-        weight=0.3
+        weight=0.3,
+        replay_speed= lambda n:np.random.uniform(0.8, 1.2, size=(n,)),
     ),
     "walk/lower": dict(
         key_links = ["pelvis", "right_thigh", "right_shin", "right_foot", "left_thigh", "left_shin", "left_foot"],
