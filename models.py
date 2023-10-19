@@ -84,7 +84,12 @@ class DiagonalPopArt(torch.nn.Module):
 class Discriminator(torch.nn.Module):
     def __init__(self, disc_dim, latent_dim=256):
         super().__init__()
-        self.rnn = torch.nn.GRU(disc_dim, latent_dim, batch_first=True)
+        # self.rnn = torch.nn.GRU(disc_dim, latent_dim, batch_first=True)
+        self.rnn = torch.nn.Sequential(
+            torch.nn.Linear(disc_dim, 512),
+            torch.nn.ReLU6(),
+            torch.nn.Linear(512, latent_dim)     # value_dim = critic 개수
+        )        
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(latent_dim, 256),
             torch.nn.ReLU(),
@@ -113,7 +118,8 @@ class Discriminator(torch.nn.Module):
             if n_inst > self.all_inst.size(0):
                 self.all_inst = torch.arange(n_inst, 
                     dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-            s, _ = self.rnn(s)
+            # s, _ = self.rnn(s)
+            s = self.rnn(s)
             s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
         return self.mlp(s)
 
@@ -123,7 +129,12 @@ class ACModel(torch.nn.Module):
     class Critic(torch.nn.Module):
         def __init__(self, state_dim, goal_dim, value_dim=1, latent_dim=256):
             super().__init__()
-            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            # self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            self.rnn = torch.nn.Sequential(
+                torch.nn.Linear(state_dim, 512),
+                torch.nn.ReLU6(),
+                torch.nn.Linear(512, latent_dim)     # value_dim = critic 개수
+            )
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(latent_dim+goal_dim, 1024),
                 torch.nn.ReLU6(),
@@ -148,7 +159,8 @@ class ACModel(torch.nn.Module):
                 if n_inst > self.all_inst.size(0):
                     self.all_inst = torch.arange(n_inst, 
                         dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                s, _ = self.rnn(s)
+                # s, _ = self.rnn(s)
+                s = self.rnn(s)
                 s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
             if g is not None:
                 s = torch.cat((s, g), -1)
@@ -158,7 +170,12 @@ class ACModel(torch.nn.Module):
     class Actor(torch.nn.Module):
         def __init__(self, state_dim, act_dim, goal_dim, latent_dim=256, init_mu=None, init_sigma=None):
             super().__init__()
-            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            # self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            self.rnn = torch.nn.Sequential(
+                torch.nn.Linear(state_dim, 512),
+                torch.nn.ReLU6(),
+                torch.nn.Linear(512, latent_dim)     # value_dim = critic 개수
+            )            
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(latent_dim+goal_dim, 1024),
                 torch.nn.ReLU6(),
@@ -197,7 +214,8 @@ class ACModel(torch.nn.Module):
                 if n_inst > self.all_inst.size(0):
                     self.all_inst = torch.arange(n_inst, 
                         dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                s, _ = self.rnn(s)          # output s [n, 4, 256]
+                # s, _ = self.rnn(s)
+                s = self.rnn(s)          # output s [n, 4, 256]
                 s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))] # output s [n', 256]
 
             if g is not None:
