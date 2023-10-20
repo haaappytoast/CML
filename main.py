@@ -243,6 +243,7 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
 
             model.train()
             n_samples = 0
+            #! discriminator loss calc
             for name, disc, ref, ob, seq_end_frame_ in disc_data_training:
                 real_loss = real_losses[name]
                 fake_loss = fake_losses[name]
@@ -258,9 +259,21 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
 
                     score_r = disc(r, seq_end_frame, normalize=False)
                     score_f = disc(f, seq_end_frame, normalize=False)
-                
-                    loss_r = torch.nn.functional.relu(1-score_r).mean()
-                    loss_f = torch.nn.functional.relu(1+score_f).mean()
+
+                    def _disc_loss_neg(disc_logits):  # disc_logits: output of disc.network()
+                        bce = torch.nn.BCEWithLogitsLoss()
+                        loss = bce(disc_logits, torch.zeros_like(disc_logits))
+                        return loss
+                    def _disc_loss_pos(disc_logits):
+                        bce = torch.nn.BCEWithLogitsLoss()
+                        loss = bce(disc_logits, torch.ones_like(disc_logits))
+                        return loss
+                    
+                    # loss_r = torch.nn.functional.relu(1-score_r).mean()
+                    # loss_f = torch.nn.functional.relu(1+score_f).mean()
+                    #! ASE loss function experiment!
+                    loss_r = _disc_loss_pos(1-score_r)  # real
+                    loss_f = _disc_loss_neg(1-score_r)  # agent
 
                     with torch.no_grad():
                         alpha = torch.rand(r.size(0), dtype=r.dtype, device=r.device)
@@ -292,9 +305,16 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
                 else:
                     reward_weights = None
                     rewards = None
+                #! disc reward
                 for name, disc, ob, seq_end_frame in disc_data_raw:
+                    # r = (disc(ob, seq_end_frame).clamp_(-1, 1)
+                    #         .mean(-1, keepdim=True))
+                    disc_logits = disc(ob, seq_end_frame)
+                    prob = 1 / (1 + torch.exp(-disc_logits)) 
+                    disc_r = -torch.log(torch.maximum(1 - prob, torch.tensor(0.0001, device=disc_logits.device))).mean(-1, keepdim=True)
                     r = (disc(ob, seq_end_frame).clamp_(-1, 1)
                             .mean(-1, keepdim=True))
+
                     if rewards is None:
                         rewards = r
                     else:
