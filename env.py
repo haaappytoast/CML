@@ -75,7 +75,7 @@ class Env(object):
         self.gym = gymapi.acquire_gym()
         self.sim = self.gym.create_sim(compute_device, graphics_device, gymapi.SIM_PHYSX, sim_params)
         self.add_ground()
-        self.envs, self.actors = self.create_envs(n_envs)
+        self.envs, self.actors = self.create_envs(n_envs)   # _load_target_asset -> 
         self.setup_action_normalizer()
         self.create_tensors()
 
@@ -185,6 +185,12 @@ class Env(object):
         start_pose = gymapi.Transform()
         start_pose.p = gymapi.Vec3(*self.vector_up(0.89))
         start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+
+        # humanoid
+        self.num_bodies = self.gym.get_asset_rigid_body_count(actor_asset)
+        self.num_dof = self.gym.get_asset_dof_count(actor_asset)
+        self.num_joints = self.gym.get_asset_joint_count(actor_asset)
+
         for i in range(n):
             env = self.gym.create_env(self.sim, spacing_lower, spacing_upper, n_envs_per_row)
             actor = self.gym.create_actor(env, actor_asset, start_pose, "actor", i, -1, 0)
@@ -196,6 +202,8 @@ class Env(object):
             dof_prop = self.gym.get_asset_dof_properties(actor_asset)
             dof_prop["driveMode"].fill(control_mode)
             self.gym.set_actor_dof_properties(env, actor, dof_prop)
+
+        self.num_envs = len(envs)
         return envs, actors
 
     def render(self):
@@ -255,24 +263,32 @@ class Env(object):
         self.gym.refresh_net_contact_force_tensor(self.sim)
 
     def create_tensors(self):
-        root_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
-        root_tensor = gymtorch.wrap_tensor(root_tensor)
-        self.root_tensor = root_tensor.view(len(self.envs), -1, 13)
+        self._all_root_tensor = self.gym.acquire_actor_root_state_tensor(self.sim)
+        self._all_root_tensor = gymtorch.wrap_tensor(self._all_root_tensor)
+        #! humanoid root
+        self.root_tensor = self._all_root_tensor.view(len(self.envs), -1, 13)[..., 0, :].unsqueeze(1)      # [num_envs, 13]
+        
+        num_actors = self.get_num_actors_per_env()
+        self._humanoid_actor_ids = num_actors * torch.arange(self.num_envs, device=self.device, dtype=torch.int32)
 
         num_links = self.gym.get_env_rigid_body_count(self.envs[0])
-        link_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
-        link_tensor = gymtorch.wrap_tensor(link_tensor)
-        self.link_tensor = link_tensor.view(len(self.envs), num_links, -1)
-
+        self._all_link_tensor = self.gym.acquire_rigid_body_state_tensor(self.sim)
+        self._all_link_tensor = gymtorch.wrap_tensor(self._all_link_tensor)
+        #! humanoid link: self.num_bodies
+        self.link_tensor = self._all_link_tensor.view(len(self.envs), num_links, -1)[..., :self.num_bodies, :]
         num_dof = self.gym.get_env_dof_count(self.envs[0])
         joint_tensor = self.gym.acquire_dof_state_tensor(self.sim)
         joint_tensor = gymtorch.wrap_tensor(joint_tensor)
         # IsaacGym Preview 3 supports fix, revolute and prismatic (1d) joints only
-        self.joint_tensor = joint_tensor.view(len(self.envs), num_dof, -1)  # n_envs x n_dof x 2 (pos, vel for each)
-
+        #! humanoid num_dof: self.num_dof
+        self.joint_tensor = joint_tensor.view(len(self.envs), num_dof, -1)[..., :self.num_dof, :]  # n_envs x n_dof x 2 (pos, vel for each)
         contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
         contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor)
         self.contact_force_tensor = contact_force_tensor.view(len(self.envs), -1, 3)
+
+    def get_num_actors_per_env(self):
+        num_actors = self._all_root_tensor.shape[0] // self.num_envs
+        return num_actors  
 
     def setup_action_normalizer(self):
         action_lower, action_upper = [], []
@@ -294,7 +310,6 @@ class Env(object):
         action_scale *= 0.5 * np.subtract(action_upper, action_lower)
         self.action_offset = torch.tensor(action_offset, dtype=torch.float32, device=self.device)
         self.action_scale = torch.tensor(action_scale, dtype=torch.float32, device=self.device)
-
     def process_actions(self, actions):
         if type(actions) is tuple and len(actions) is 1:
             actions = actions[0]
@@ -321,11 +336,11 @@ class Env(object):
     
     def reset_envs(self, env_ids):
         ref_root_tensor, ref_link_tensor, ref_joint_tensor = self.init_state(env_ids)
-
         self.root_tensor[env_ids] = ref_root_tensor
         self.link_tensor[env_ids] = ref_link_tensor
         self.joint_tensor[env_ids] = ref_joint_tensor
 
+        #actor_ids = self.actor_ids[env_ids].flatten()
         actor_ids = self.actor_ids[env_ids].flatten()
         n_actor_ids = len(actor_ids)
         actor_ids = gymtorch.unwrap_tensor(actor_ids)
@@ -1810,19 +1825,17 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         l_goal_motion_ids = None
         for ref_motion, _, _, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
-                up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
+                up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
 
             if "left" in discs[0].name:
                 l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
             else:   # lower body
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
-                
                 pass
         
         # upper body
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
-
         # lower body
         self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
 
@@ -1855,7 +1868,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         # self.visualize_ee_positions()
-        self.visualize_goal_positions_wrt_curr()
+        # self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -1911,7 +1924,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 # self.goal_motion_times가 etime을 over 했을 때 --> 그 해당하는 env에 새로운 reference의 motion_ids, stime, etime 넣어주기!
                 over_etime = torch.nonzero(self.goal_motion_times[:, 0] - self.etime[:, 0] > 0.001).view(-1)
                 if len(over_etime):
-                    goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(over_etime))
+                    goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(over_etime), isInference=self.inference)
 
                     self.goal_motion_ids[over_etime, 0] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
                     self.goal_motion_times[over_etime, 0] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
@@ -1985,19 +1998,24 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.link_tensor[env_ids] = ref_link_tensor
         self.joint_tensor[env_ids] = ref_joint_tensor
 
-        actor_ids = self.actor_ids[env_ids].flatten()
-        n_actor_ids = len(actor_ids)
-        actor_ids = gymtorch.unwrap_tensor(actor_ids)
+        #actor_ids = self.actor_ids[env_ids].flatten()
+        #n_actor_ids = len(actor_ids)
+        #actor_ids = gymtorch.unwrap_tensor(actor_ids)
+        
+        #! humanoid
+        env_ids_int32 = self._humanoid_actor_ids[env_ids].flatten()
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            gymtorch.unwrap_tensor(self.root_tensor),
-            actor_ids, n_actor_ids
+            gymtorch.unwrap_tensor(self.root_tensor.squeeze(1)),
+            gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
         )
-        actor_ids = self.actor_ids_having_dofs[env_ids].flatten()
-        n_actor_ids = len(actor_ids)
-        actor_ids = gymtorch.unwrap_tensor(actor_ids)
+
+        #actor_ids = self.actor_ids_having_dofs[env_ids].flatten()
+
+        #n_actor_ids = len(actor_ids)
+        #actor_ids = gymtorch.unwrap_tensor(actor_ids)
         self.gym.set_dof_state_tensor_indexed(self.sim,
             gymtorch.unwrap_tensor(self.joint_tensor),
-            actor_ids, n_actor_ids
+            gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
         )
 
         self.lifetime[env_ids] = 0
@@ -2511,7 +2529,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         #! code for only lower body discriminator 
         for ref_motion, _, _, discs in self.disc_ref_motion:        
             if "upper" in discs[0].name in discs[0].name:
-                upper_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
+                upper_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
                 self.goal_motion_ids[env_ids, 0] = torch.tensor(upper_goal_motion_ids, dtype=torch.int32, device=self.device)
             if "lower" in discs[0].name or "full" in discs[0].name:
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
@@ -2978,3 +2996,124 @@ def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
         heading_ob = torch.cat((heading_ob, facing_ob), -1)
 
     return torch.cat((ob, ubody_ob, heading_ob), -1)
+
+class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
+    STRIKE_BODY_NAMES = ["right_hand", "right_lower_arm"]
+
+    def __init__(self, *args, 
+                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
+                 **kwargs):
+
+        self.sensor_inputs = sensor_inputs
+        self.strike_body_names = parse_kwarg(kwargs, "strike_body_names", self.STRIKE_BODY_NAMES)
+
+        super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
+
+    def create_envs(self, n: int):
+        self._load_target_asset()
+        if self.control_mode == "position":
+            control_mode = gymapi.DOF_MODE_POS
+        elif self.control_mode == "torque":
+            control_mode = gymapi.DOF_MODE_EFFORT
+        else:
+            control_mode = gymapi.DOF_MODE_NONE
+
+        envs, humanoid_handles = [], []
+        env_spacing = 3
+
+        asset_options = gymapi.AssetOptions()
+        # asset_options.fix_base_link = True
+        asset_options.angular_damping = 0.01
+        asset_options.max_angular_velocity = 100.0
+        asset_options.default_dof_drive_mode = int(gymapi.DOF_MODE_NONE)
+        actor_asset = self.gym.load_asset(self.sim, os.path.abspath(os.path.dirname(self.character_model)), os.path.basename(self.character_model), asset_options)
+        spacing_lower = gymapi.Vec3(-env_spacing, -env_spacing, 0)
+        spacing_upper = gymapi.Vec3(env_spacing, env_spacing, env_spacing)
+        n_envs_per_row = int(n**0.5)
+        start_pose = gymapi.Transform()
+        start_pose.p = gymapi.Vec3(*self.vector_up(0.89))
+        start_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
+        
+        self.num_bodies = self.gym.get_asset_rigid_body_count(actor_asset)
+        self.num_dof = self.gym.get_asset_dof_count(actor_asset)
+        self.num_joints = self.gym.get_asset_joint_count(actor_asset)
+
+        for i in range(n):
+            env = self.gym.create_env(self.sim, spacing_lower, spacing_upper, n_envs_per_row)
+            humanoid_handle = self.gym.create_actor(env, actor_asset, start_pose, "actor", i, -1, 0)
+            humanoid_handles.append(humanoid_handle)
+            # enable PD controlget_asset_dof_properties
+            # Kp (stiffness) and Kd (damping) are defined inside the mjcf xml file
+            dof_prop = self.gym.get_asset_dof_properties(actor_asset)
+            dof_prop["driveMode"].fill(control_mode)
+            self.gym.set_actor_dof_properties(env, humanoid_handle, dof_prop)
+            
+            self._build_target(env, i)
+
+            envs.append(env)
+
+        #self.get_num_actors_per_env()
+        self.num_envs = len(envs)
+        return envs, humanoid_handles
+    
+    def _load_target_asset(self):
+        self._target_handles = []
+        asset_root = "./assets"
+        asset_file = "strike_target.urdf"
+
+        asset_options = gymapi.AssetOptions()
+        asset_options.angular_damping = 0.01
+        asset_options.linear_damping = 0.01
+        asset_options.max_angular_velocity = 100.0
+        asset_options.density = 10.0
+        asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
+
+        self._target_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        print("===== loaded target asset =====")
+        return
+    
+
+    def _build_target(self, env_ptr, env_id):
+        col_group = env_id
+        col_filter = 0
+        segmentation_id = 0
+
+        default_pose = gymapi.Transform()
+        default_pose.p.x = -0.3
+        default_pose.p.y = 3.0
+        default_pose.p.z = 0.9
+        
+        target_handle = self.gym.create_actor(env_ptr, self._target_asset, default_pose, "target", col_group, col_filter, segmentation_id)
+        self._target_handles.append(target_handle)
+        return
+    
+
+    def _build_strike_body_ids_tensor(self, env_ptr, actor_handle, body_names):
+        env_ptr = self.envs[0]
+        actor_handle = self.actors[0]
+        body_ids = []
+
+        for body_name in body_names:
+            body_id = self.gym.find_actor_rigid_body_handle(env_ptr, actor_handle, body_name)
+            assert(body_id != -1)
+            body_ids.append(body_id)
+
+        body_ids = torch.tensor(body_ids, device=self.device, dtype=torch.long)
+        return body_ids
+    
+    def _build_target_tensors(self):
+        num_actors = self.get_num_actors_per_env()
+        self._target_states = self._all_root_tensor.view(self.num_envs, num_actors, 13)[..., 1, :]      # [n_envs, 13]
+        self._tar_actor_ids = torch.tensor(num_actors * np.arange(self.num_envs), device=self.device, dtype=torch.int32) + 1
+        
+        bodies_per_env = self._all_link_tensor.shape[0] // self.num_envs
+        contact_force_tensor = self.gym.acquire_net_contact_force_tensor(self.sim)
+        contact_force_tensor = gymtorch.wrap_tensor(contact_force_tensor)               # [num_links + 1, 3]
+        # 캐릭터 num_bodies 이후, 마지막 원소만 가져오기 [1, 3]        
+        self._tar_contact_forces = contact_force_tensor.view(self.num_envs, bodies_per_env, 3)[..., self.num_bodies, :]
+
+    def create_tensors(self):
+        super().create_tensors()
+        self._strike_body_ids = self._build_strike_body_ids_tensor(self.envs[0], self.actors[0], self.strike_body_names)
+        self._build_target_tensors()
+        return 
