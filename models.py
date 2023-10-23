@@ -85,6 +85,14 @@ class Discriminator(torch.nn.Module):
     def __init__(self, disc_dim, latent_dim=256):
         super().__init__()
         self.rnn = torch.nn.GRU(disc_dim, latent_dim, batch_first=True)
+        '''
+        self.rnn = torch.nn.Sequential(
+            torch.nn.Linear(disc_dim, 512),
+            torch.nn.ReLU6(),
+            torch.nn.Linear(512, latent_dim)     # value_dim = critic 개수
+            
+        )   
+        '''
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(latent_dim, 256),
             torch.nn.ReLU(),
@@ -114,6 +122,7 @@ class Discriminator(torch.nn.Module):
                 self.all_inst = torch.arange(n_inst, 
                     dtype=seq_end_frame.dtype, device=seq_end_frame.device)
             s, _ = self.rnn(s)
+            #s = self.rnn(s)
             s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
         return self.mlp(s)
 

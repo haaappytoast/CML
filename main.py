@@ -532,7 +532,7 @@ if __name__ == "__main__":
         if "view" in (config.env_cls).lower():
             pass
         else:
-            env.episode_length = 300
+            env.episode_length = 600
 
     value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
     model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)

@@ -292,7 +292,7 @@ class ReferenceMotion():
         # offset[zero_ids] = random_offset
         return random_offset
     
-    def generate_motion_patch(self, n, truncate_time=None):
+    def generate_motion_patch(self, n, isInference=False, truncate_time=None):
         # start motion sequence
         p = np.divide(self.motion_weight, sum(self.motion_weight))
         motion_ids = np.random.choice(len(self.motion), size=n, p=p, replace=True)
@@ -303,6 +303,10 @@ class ReferenceMotion():
         start_motion_time = start_phase * motion_len
         duration_phase = np.random.uniform(low=0.3, high=0.5, size=motion_ids.shape)
         end_motion_phase = np.clip(start_phase + duration_phase, 0.0, 1.0)
+        if isInference:
+            end_motion_phase = 1
+        else:
+            pass
         end_motion_time = end_motion_phase * motion_len
         return motion_ids, start_motion_time, end_motion_time                           # 모션 끝나는 시점
         
