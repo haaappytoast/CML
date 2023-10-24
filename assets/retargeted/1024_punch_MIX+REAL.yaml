@@ -1,0 +1,45 @@
+motions:
+# mix
+- file: 1024_punch_MIX/CML@Combo Punch.npy
+  weight: null
+- file: 1024_punch_MIX/CML@Combo Punch (1).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Combo Punch (2).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Combo Punch (3).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Combo Punch (4).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Combo Punch (5).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag.npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag (1).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag (2).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag (3).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag (4).npy
+  weight: null
+- file: 1024_punch_MIX/CML@Punching Bag (5).npy
+  weight: null
+
+# REAL
+- file: 1024_punch_REAL/cml@punch1.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch2.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch3.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch4.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch5.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch6.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch7.npy
+  weight: null
+- file: 1024_punch_REAL/cml@punch8.npy
+  weight: null
+
