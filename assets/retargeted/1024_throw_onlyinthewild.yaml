@@ -1,0 +1,22 @@
+motions:
+- file: 1024_throw_inthewild/cml@test_throw1.npy
+  weight: null
+- file: 1024_throw_inthewild/cml@test_throw2.npy
+  weight: null
+
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (1).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (2).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (3).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (4).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (5).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (6).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (7).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (8).npy
+  weight: null
