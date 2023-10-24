@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/throw_joystick.py --ckpt 1020_throw --headless --server 
+# python main.py config/throw_joystick.py --ckpt 1024_throw_inthewild --headless --server 
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -10,7 +10,7 @@ env_params = dict(
     goal_timer_range = (90, 150),
     goal_sp_mean = 1.,
     goal_sp_std = 0.25,
-    goal_sp_min = 0,
+    goal_sp_min = 1,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
     goal_termination = False
@@ -46,8 +46,9 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1020_throw.yaml",
-        # motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
+        # motion_file = "assets/retargeted/1020_throw.yaml",
+        # motion_file = "assets/retargeted/test/1024_throw/cml@throwjointInfo0 (2).npy",
+        motion_file = "assets/retargeted/1024_throw_inthewild.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,

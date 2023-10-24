@@ -1,0 +1,41 @@
+motions:
+
+- file: 1020_throw/cml@Frisbee Throw.npy
+  weight: null
+- file: 1020_throw/cml@Frisbee Throw (1).npy
+  weight: null
+- file: 1020_throw/cml@Frisbee Throw (2).npy
+  weight: null
+- file: 1020_throw/cml@Frisbee Throw (3).npy
+  weight: null
+- file: 1020_throw/cml@Throw Object.npy
+  weight: null
+- file: 1020_throw/cml@Throw Object (1).npy
+  weight: null
+- file: 1020_throw/cml@Throw Object (3).npy
+  weight: null
+- file: 1020_throw/cml@Throw Object (4).npy
+  weight: null
+
+# in-the-wild added
+- file: 1024_throw_inthewild/cml@test_throw1.npy
+  weight: null
+- file: 1024_throw_inthewild/cml@test_throw2.npy
+  weight: null
+
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (1).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (2).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (3).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (4).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (5).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (6).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (7).npy
+  weight: null
+- file: 1024_throw_inthewild/cml@throwjointInfo0 (8).npy
+  weight: null
