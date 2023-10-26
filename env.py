@@ -1822,7 +1822,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.motion_times[env_ids] = torch.tensor(motion_times, dtype=torch.float32, device=self.device)
 
         # initialize goal_motion
-        l_goal_motion_ids = None
+        l_goal_motion_ids = []
         for ref_motion, _, _, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
                 up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
@@ -1838,9 +1838,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
         # lower body
         self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
-
         # left section of upper body
-        if (l_goal_motion_ids != None):
+        if (len(l_goal_motion_ids) != 0):
             self.goal_motion_ids[env_ids, 1] = torch.tensor(l_goal_motion_ids, dtype=torch.int32, device=self.device)
             self.etime[env_ids, 1] = torch.tensor(l_goal_motion_etime, dtype=torch.float32, device=self.device)
 
@@ -1868,7 +1867,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         # self.visualize_ee_positions()
-        # self.visualize_goal_positions_wrt_curr()
+        self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -1934,8 +1933,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
                 motion_times0 = self.goal_motion_times[:, 1].cpu().numpy()
                 motion_ids0 = self.goal_motion_ids[:, 1].cpu().numpy()
-                _, left_link_tensor, left_joint_tensor = ref_motion.state(motion_ids0, motion_times0)
+                left_root_tensor, left_link_tensor, left_joint_tensor = ref_motion.state(motion_ids0, motion_times0)
 
+                root_tensor[env_ids, 1] = left_root_tensor
                 link_tensor[..., key_links, :] = left_link_tensor[..., key_links, :]
                 for idx in key_links:
                     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \

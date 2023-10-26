@@ -13,7 +13,7 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
-    goal_termination = True
+    goal_termination = False
 )
 
 training_params = dict(
