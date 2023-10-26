@@ -1828,7 +1828,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
 
             if "left" in discs[0].name:
-                l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
+                l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
             else:   # lower body
                 lower_goal_motion_ids, _, _ = ref_motion.generate_motion_patch(len(env_ids))
                 pass
@@ -1886,12 +1886,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 dt_tensor = torch.tensor(dt, dtype=torch.float32, device=device)                  # list -> tensor
             else:
                 dt_tensor = torch.tensor(dt, dtype=torch.float32, device=device).repeat(n_inst)   # float -> tensor
-            return dt, dt_tensor
+            return dt_tensor
         
         def get_env_ids_infos(lifetime):
             not_init_env_ids = torch.nonzero(lifetime).view(-1)
-            init_env_ids = (lifetime == 0).nonzero().view(-1)
-            return not_init_env_ids, init_env_ids
+            #init_env_ids = (lifetime == 0).nonzero().view(-1)
+            return not_init_env_ids
         
         n_inst = len(self.envs)
         env_ids = list(range(n_inst))
@@ -1903,13 +1903,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
             key_links = discs[0].key_links
             if "upper" in discs[0].name or "full" in discs[0].name:
-                dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
-                not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
+                dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
+                not_init_env_ids = get_env_ids_infos(self.lifetime)
 
                 if len(not_init_env_ids):
                     self.goal_motion_times[not_init_env_ids, 0] = self.goal_motion_times[not_init_env_ids, 0] + dt_tensor[not_init_env_ids.cpu()]
-                elif len(init_env_ids):
-                    self.goal_motion_times[init_env_ids, 0] = self.goal_motion_times[init_env_ids, 0] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
             
                 motion_times0 = self.goal_motion_times[:, 0].cpu().numpy()
                 motion_ids0 = self.goal_motion_ids[:, 0].cpu().numpy()
@@ -1930,14 +1928,36 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                     self.goal_motion_times[over_etime, 0] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
 
                     self.etime[over_etime, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device) 
+            elif "left" in discs[0].name:
+                if len(not_init_env_ids):
+                    self.goal_motion_times[not_init_env_ids, 1] = self.goal_motion_times[not_init_env_ids, 1] + dt_tensor[not_init_env_ids.cpu()]
+
+                motion_times0 = self.goal_motion_times[:, 1].cpu().numpy()
+                motion_ids0 = self.goal_motion_ids[:, 1].cpu().numpy()
+                _, left_link_tensor, left_joint_tensor = ref_motion.state(motion_ids0, motion_times0)
+
+                link_tensor[..., key_links, :] = left_link_tensor[..., key_links, :]
+                for idx in key_links:
+                    joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
+                    left_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
+
+                # self.goal_motion_times가 etime을 over 했을 때 --> 그 해당하는 env에 새로운 reference의 motion_ids, stime, etime 넣어주기!
+                over_etime = torch.nonzero(self.goal_motion_times[:, 1] - self.etime[:, 1] > 0.001).view(-1)
+                if len(over_etime):
+                    goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(over_etime), isInference=self.inference)
+
+                    self.goal_motion_ids[over_etime, 1] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
+                    self.goal_motion_times[over_etime, 1] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
+
+                    self.etime[over_etime, 1] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device)                     
             # lower body discriminator
             else:   
-                dt, dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
+                dt_tensor = _get_dt_dttensor(self.device, self.step_time, n_inst, replay_speed)
                 # humanoid 시간 따로
                 self.motion_times = self.motion_times + dt_tensor
 
                 #! goal_motion_ids는 lifetime이 다할 때마다 바꿔주기!
-                not_init_env_ids, init_env_ids = get_env_ids_infos(self.lifetime)
+                not_init_env_ids = get_env_ids_infos(self.lifetime)
 
                 # motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
                 other_root_tensor, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
