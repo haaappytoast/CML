@@ -113,11 +113,27 @@ def logger(obs, rews, info):
         
         else:
             rewards_task = None
+        
         print("Reward: {}".format("/".join(list(map("{:.4f}".format, rewards.mean(0).cpu().tolist()  )))))  # 모든 env에서의 mean값
-    return rewards.sum(dim=1)      # 각 env에 대한 reward 값
+        
+    return rewards.sum(dim=1), rewards.mean(0)      # 각 env에 대한 reward 값
 
 
 def test(env, model):
+    #### for evaluation
+    ep = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
+    np_reward = np.empty([ep, 4])
+    curr_ep = 0
+    count = 0
+    dir_name = settings.ckpt.split("/")[0] + "/eval"
+    # Check if the directory already exists
+    if not os.path.exists(dir_name):
+        os.mkdir(dir_name)
+        print(f"Directory {dir_name} created.")
+    else:
+        print(f"Directory {dir_name} already exists.")
+    ####
+
     model.eval()
     env.reset()
     rewards_tot = torch.zeros((num_envs,), dtype=torch.float64)                   # 4개의 env
@@ -128,17 +144,40 @@ def test(env, model):
         actions = model.act(obs, seq_len-1)
         obs, rews, _, info = env.step(actions)                                 # apply_actions -> do_simulation -> refresh_tensors -> observe()
 
-        reward = logger(obs, rews, info)
+
+        reward, sep_reward = logger(obs, rews, info)
+
+        if curr_ep < ep:
+            np_reward[curr_ep] = sep_reward
+            curr_ep += 1
+
         
         rewards_tot += reward
         counter += torch.where(info["terminate"] == False, 1, 0).cpu()  # counter 더해주기
         # terminate 되었다면
         terminated_env = (info["terminate"] == True).nonzero().view(-1).cpu()
+        if curr_ep == ep or len(terminated_env):
+            time.time()
+            print("\n================" + str(curr_ep) + ": save reward_trial " + str(count), "================\n")
+            np.save(dir_name + "/trial" + str(count) + "_avg_reward", np_reward[..., :curr_ep])
+            #tot_return = np.array([rewards_tot[e] / counter[e].item(), rewards_tot[e]])
+            #print(tot_return)
+            #np.save(settings.ckpt+ "/trial" + str(count) + "_avg_reward+total_return", np_reward)
+            curr_ep = 0
+            count += 1
+        
         # terminate 된 env가 있다면
         if len(terminated_env):
             for e in terminated_env:
                 print("ENV {:d} / avg reward: {:.4f} / total return: {:.4f}".format(e, rewards_tot[e] / counter[e].item(), rewards_tot[e]))
             counter[terminated_env] = torch.zeros_like(terminated_env, dtype=torch.int32)   # counter는 0dmfh gownjdigka!
+
+        # write txt file
+        # while terminated_env < 300:
+
+        #     np_reward = np.vstack([np_reward, sep_reward])
+        #     print(np_reward)
+        #     pass
 
 def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_optimizer=None):
     if ckpt_dir is not None:
@@ -447,7 +486,7 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
 
 if __name__ == "__main__":
     if settings.test:
-        num_envs = 3
+        num_envs = 1
     else:
         num_envs = NUM_ENVS
         if settings.ckpt:
@@ -525,6 +564,7 @@ if __name__ == "__main__":
         discriminators=discriminators,
         compute_device=settings.device, 
         sensor_inputs=sensor_input,
+        ckpt=settings.ckpt,
         **config.env_params,
         **reward_coeff
     )
@@ -532,7 +572,8 @@ if __name__ == "__main__":
         if "view" in (config.env_cls).lower():
             pass
         else:
-            env.episode_length = 600
+            env.episode_length = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
+
 
     value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
     model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)

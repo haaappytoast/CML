@@ -1657,6 +1657,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     GOAL_TERMINATION = True
     def __init__(self, *args, 
                  sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
+                ckpt: Optional[str] = None,
                  **kwargs):
 
         self.rpos_coeff = parse_kwarg(kwargs, "rhand_pos", self.RPOS_COEFF)
@@ -1673,6 +1674,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             print("\n=======\n", name, ": sensor input path well detected", "\n=======\n")
             if name == "test":
                 self.inference = True
+                disc = parse_kwarg(kwargs, "discriminators", 300)
+                self.ep = np.load(disc["usermotion1/upper"].motion_file, allow_pickle=True).item()['rotation']['arr'].shape[0]
+                self.curr_ep = 0
+                self.count = 0
+                self.tracking_errors = np.empty([self.ep, 3])   # headset_error [cm], headset_error [deg], controller_error [cm]
+                self.ckpt = ckpt
             else:
                 self.inference = False
 
@@ -1740,9 +1747,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
                 self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)
 
-
-
         obs, rews, dones, info = super().step(actions)
+
+        # record tracking_errors
+        if self.inference:
+            self.track_errors()
+
         return obs, rews, dones, info
     
     def goal_motion_overtime_check(self):
@@ -1825,7 +1835,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         l_goal_motion_ids = None
         for ref_motion, _, _, discs in self.disc_ref_motion:
             if "upper" in discs[0].name or "full" in discs[0].name:
-                up_goal_motion_ids, _, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
+                up_goal_motion_ids, up_goal_motion_start, up_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids), isInference=self.inference)
 
             if "left" in discs[0].name:
                 l_goal_motion_ids, _, l_goal_motion_etime = ref_motion.generate_motion_patch(len(env_ids))
@@ -1834,6 +1844,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 pass
         
         # upper body
+        if self.inference:
+            self.goal_motion_times[env_ids, 0] = torch.zeros_like(self.goal_motion_times[env_ids, 0])
+            
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
         # lower body
@@ -1868,7 +1881,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         # self.visualize_ee_positions()
-        # self.visualize_goal_positions_wrt_curr()
+        #self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -1909,7 +1922,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 if len(not_init_env_ids):
                     self.goal_motion_times[not_init_env_ids, 0] = self.goal_motion_times[not_init_env_ids, 0] + dt_tensor[not_init_env_ids.cpu()]
                 elif len(init_env_ids):
-                    self.goal_motion_times[init_env_ids, 0] = self.goal_motion_times[init_env_ids, 0] + torch.zeros(len(init_env_ids), dtype=torch.float32, device=self.device)
+                    # 새로 시작해야됌
+                    goal_motion_ids, goal_motion_stime, goal_motion_etime = ref_motion.generate_motion_patch(len(init_env_ids), isInference=self.inference)
+                    self.goal_motion_ids[init_env_ids, 0] = torch.tensor(goal_motion_ids, dtype=torch.int32, device=self.device)
+                    self.goal_motion_times[init_env_ids, 0] = torch.tensor(goal_motion_stime, dtype=torch.float32, device=self.device)
+                    self.etime[init_env_ids, 0] = torch.tensor(goal_motion_etime, dtype=torch.float32, device=self.device)
+
+                    self.goal_motion_times[init_env_ids, 0] = self.goal_motion_times[init_env_ids, 0]
             
                 motion_times0 = self.goal_motion_times[:, 0].cpu().numpy()
                 motion_ids0 = self.goal_motion_ids[:, 0].cpu().numpy()
@@ -2129,8 +2148,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             target_rcontrol_gpos = goal_tensor[..., :3]
             # ego_target_rcontrol_pos = global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
             ego_target_rcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_rcontrol_gpos, 2)
-            e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1).div_(rarm_len)
-            rcontrol_rew = e.mul_(-2).exp_()
+            e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1)
+            rcontrol_rew = (e.div_(rarm_len)).mul_(-2).exp_()
 
             self.control_errors[..., 0] = e
         #! 1. end
@@ -2147,8 +2166,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             target_lcontrol_gpos = goal_tensor[..., start_idx + 0 : start_idx + 3]
             ego_target_lcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_lcontrol_gpos, 2)
 
-            l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1).div_(larm_len)
-            lcontrol_rew = l_e.mul_(-2).exp_()
+            l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1)
+            lcontrol_rew = l_e.div_(larm_len).mul_(-2).exp_()
 
             self.control_errors[..., 1] = l_e
         #! 2. end
@@ -2196,10 +2215,26 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             
             self.control_errors[..., 3] = hmd_rot_e
         #! 4. end
+        # save array of tracking error of headset and controllers
+ 
+
         total_r = (self.rpos_coeff * rcontrol_rew + self.lpos_coeff * lcontrol_rew \
                     + self.hpos_coeff * hmd_pos_e_rew + self.hrot_coeff * hmd_rot_e_rew) 
         return total_r.unsqueeze_(-1)
     
+    def track_errors(self):
+        if self.curr_ep < self.ep:
+            # 1. rlcontroller [cm], headset [cm], headset [deg] 
+            errors = torch.hstack([self.control_errors[..., 0:2].mean(), self.control_errors[..., 2:].mean(dim=0)])
+            self.tracking_errors[self.curr_ep] = np.array(errors.cpu().numpy())
+            self.curr_ep+=1
+        
+        if self.curr_ep == self.ep or len((self.info["terminate"] == True).nonzero()):
+            print("\n================" + str(self.curr_ep) + ": save tracking error: ", str(self.count), "================")
+            np.save(self.ckpt.split("/")[0]+ "/eval/trial" + str(self.count) + "_tracking_errors", self.tracking_errors[..., :self.curr_ep])
+            self.curr_ep = 0
+            self.count +=1
+            
     def visualize_origin(self):
         pose = gymapi.Transform()
         pose.p = gymapi.Vec3(0.0, 1.0, 0.0)

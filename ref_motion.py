@@ -304,6 +304,7 @@ class ReferenceMotion():
         duration_phase = np.random.uniform(low=0.3, high=0.5, size=motion_ids.shape)
         end_motion_phase = np.clip(start_phase + duration_phase, 0.0, 1.0)
         if isInference:
+            start_motion_time = 0
             end_motion_phase = 1
         else:
             pass
