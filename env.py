@@ -2511,15 +2511,17 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
 
     HEADING_COEFF = 0
     FACING_COEFF = 0
-
     ENABLE_RANDOM_HEADING = True
+    SENSOR_ABLATION = False 
+    
     def __init__(self, *args, 
-                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
+                sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
         self.heading_coeff = parse_kwarg(kwargs, "heading", self.HEADING_COEFF)
         self.facing_coeff = parse_kwarg(kwargs, "facing", self.FACING_COEFF)
         self._enable_rand_heading = parse_kwarg(kwargs, "enableRandomHeading", self.ENABLE_RANDOM_HEADING) #! training 시 random_heading 필요
         self.sensor_inputs = sensor_inputs
+        self.sensor_ablation = parse_kwarg(kwargs, "sensor_ablation", self.SENSOR_ABLATION)                #! for ablation study
         
         self.root_coeffs = [False] * 2
         if (self.heading_coeff != 0):
@@ -2531,6 +2533,9 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             self.GOAL_TENSOR_DIM += 2       # global facing_tar_dir (2)
             self.GOAL_DIM += 2              # local_face_tar_dir
             self.root_coeffs[1] = True
+
+        if (self.sensor_ablation):
+            print("\n=======\nSENSOR ABLATION TEST!\n=======")
 
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
 
@@ -2691,6 +2696,9 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         lower_goal_rew = self.heading_coeff * heading_rew + self.facing_coeff * facing_rew
 
         r = torch.cat((sensor_rew, lower_goal_rew), -1)
+
+        if self.sensor_ablation:
+            r = lower_goal_rew
         return r
 
     # visualize target heading direction & simulated character heading direction

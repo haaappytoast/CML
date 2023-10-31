@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/punch_joystick.py --ckpt 1024_punch_MIX --headless --server 
+# python main.py config/punch_joystick.py --ckpt 1024_punch_MIX+REAL --headless --server local
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -13,7 +13,8 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
-    goal_termination = True
+    goal_termination = False,
+    sensor_ablation = False
 )
 
 training_params = dict(
@@ -46,7 +47,8 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1024_punch_MIX.yaml",
+        # motion_file = "assets/retargeted/1024_punch_REAL/cml@TESTpunch9.npy",
+        motion_file = "assets/retargeted/1024_punch_MIX+REAL.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
