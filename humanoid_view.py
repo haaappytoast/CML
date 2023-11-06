@@ -386,6 +386,7 @@ import numpy as np
 class ICCGANHumanoid(Env):
 
     CHARACTER_MODEL = "assets/new_cml.xml"
+    # 12 (EXCLUDED torso, right_hand, left_hand)
     CONTROLLABLE_LINKS = ["torso", "head", 
         "right_upper_arm", "right_lower_arm",
         "left_upper_arm", "left_lower_arm", 
@@ -858,9 +859,9 @@ class HumanoidView(ICCGANHumanoid):
         super().update_viewer()
         self.gym.clear_lines(self.viewer)
 
-        self.visualize_ee_positions()
-        self.temporary()
-        self.visualize_axis(self.link_pos[:,[2, 5, 8], :], self.link_orient[:,[2, 5, 8], :], scale = 0.2, y=True, z =True)
+        # self.visualize_ee_positions()
+        # self.temporary()
+        # self.visualize_axis(self.link_pos[:,[2, 5, 8], :], self.link_orient[:,[2, 5, 8], :], scale = 0.2, y=True, z =True)
     #! here no forces applied
     def apply_actions(self, actions):
         actions = self.process_actions(actions)
@@ -984,3 +985,26 @@ class HumanoidView(ICCGANHumanoid):
             gymutil.draw_lines(hsphere_geom, self.gym, self.viewer, self.envs[i], head_pose)   
             gymutil.draw_lines(rsphere_geom, self.gym, self.viewer, self.envs[i], rhand_pose)   
             gymutil.draw_lines(lsphere_geom, self.gym, self.viewer, self.envs[i], lhand_pose)
+
+class HumanoidViewTennis(HumanoidView):
+        
+    CHARACTER_MODEL = "assets/cml_humanoid_tennis.xml"
+    CONTROLLABLE_LINKS = ["torso", "head",                      # 2
+        "right_upper_arm", "right_lower_arm", "right_hand",     # 3
+        "left_upper_arm", "left_lower_arm",         # 3
+        "right_thigh", "right_shin", "right_foot",              # 3
+        "left_thigh", "left_shin", "left_foot"]                 # 3
+    DOFS =  [3, 3, 
+            3, 1, 3, 
+            3, 1, 
+            3, 1, 3, 
+            3, 1, 3]
+        #pelvis # torso
+    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
+                    6,  9,  10, 13,                 # "right_upper_arm", "right_lower_arm", "right_hand", "racket"
+                    13, 16, 17,                     # "left_upper_arm", "left_lower_arm", "left_hand"
+                    17, 20, 21,                     # "right_thigh", "right_shin", "right_foot",
+                    24, 27, 30, 31                  # "left_thigh", "left_shin", "left_foot"
+                    ]   
+
+    

@@ -7,7 +7,7 @@ import utils
 from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized, quat_inverse, calc_heading_quat
 from poselib.core import quat_mul
 from isaacgym import gymutil
-from humanoid_view import HumanoidView
+from humanoid_view import HumanoidView, HumanoidViewTennis
 from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
@@ -453,8 +453,17 @@ class ICCGANHumanoid(Env):
         "left_upper_arm", "left_lower_arm", 
         "right_thigh", "right_shin", "right_foot",
         "left_thigh", "left_shin", "left_foot"]
-    DOFS =  [3, 3, 3, 1, 3, 1, 3, 1, 3, 3, 1, 3]
-    DOF_OFFSET =  [0, 0, 3, 6, 9, 9, 10, 13, 13, 14, 17, 18, 21, 24, 25, 28]
+    DOFS =  [3, 3, 
+            3, 1, 
+            3, 1, 
+            3, 1, 3, 
+            3, 1, 3]
+    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
+                    6,  9, 10,                      # "right_upper_arm", "right_lower_arm", "right_hand"
+                    10, 13, 14,                     # "left_upper_arm", "left_lower_arm", "left_hand"
+                    14, 17, 18,                     # "right_thigh", "right_shin", "right_foot",
+                    21, 24, 25, 28                  # "left_thigh", "left_shin", "left_foot"
+                    ]                               
     CONTACTABLE_LINKS = ["right_foot", "left_foot"]
     UP_AXIS = 2
 
@@ -1782,7 +1791,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         self.goal_root_tensor = torch.zeros_like(self.root_tensor.repeat(1, self.EE_SIZE, 1), dtype=torch.float32, device=self.device) # [n_envs, 2, 13]
         self.goal_link_tensor = torch.zeros_like(self.link_tensor, dtype=torch.float32, device=self.device)
-        self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
+        #self.goal_joint_tensor = torch.zeros_like(self.joint_tensor, dtype=torch.float32, device=self.device)
 
         self.lbody_goal_root_tensor = torch.zeros_like(self.root_tensor, dtype=torch.float32, device=self.device) # [n_envs, 2, 13]
         
@@ -1816,12 +1825,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             self.goal_link_pos, self.goal_link_orient = self.goal_link_tensor[..., :3], self.goal_link_tensor[..., 3:7]
             self.goal_link_lin_vel, self.goal_link_ang_vel = self.goal_link_tensor[..., 7:10], self.goal_link_tensor[..., 10:13]
             self.goal_char_goal_link_tensor = self.goal_link_tensor
-        if self.goal_joint_tensor.size(1) > n_dofs:
-            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[:, :n_dofs, 0], self.goal_joint_tensor[:, :n_dofs, 1]
-            self.goal_char_joint_tensor = self.goal_joint_tensor[:, :n_dofs]
-        else:
-            self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
-            self.goal_char_joint_tensor = self.goal_joint_tensor
+        # if self.goal_joint_tensor.size(1) > n_dofs:
+        #     self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[:, :n_dofs, 0], self.goal_joint_tensor[:, :n_dofs, 1]
+        #     self.goal_char_joint_tensor = self.goal_joint_tensor[:, :n_dofs]
+        # else:
+        #     self.goal_joint_pos, self.goal_joint_vel = self.goal_joint_tensor[..., 0], self.goal_joint_tensor[..., 1]
+        #     self.goal_char_joint_tensor = self.goal_joint_tensor
         self.control_errors = torch.zeros([len(self.envs), 4], dtype=torch.float32, device=self.device)
         self.track_terminate_time = torch.zeros((len(self.envs), ), dtype=torch.float32, device=self.device)
 
@@ -1911,7 +1920,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         root_tensor = torch.zeros_like(self.goal_root_tensor[env_ids])  # [N_ENV, 2, 13]
         link_tensor = torch.zeros_like(self.goal_link_tensor[env_ids])  # [N_ENV, N_LINK, 13]
-        joint_tensor = torch.zeros_like(self.goal_joint_tensor[env_ids])# [N_ENV, N_DOF, 13]
+        #joint_tensor = torch.zeros_like(self.goal_joint_tensor[env_ids])# [N_ENV, N_DOF, 13]
 
         for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
             key_links = discs[0].key_links
@@ -1936,9 +1945,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
                 root_tensor[env_ids, 0] = up_root_tensor
                 link_tensor[..., key_links, :] = up_link_tensor[..., key_links, :]
-                for idx in key_links:
-                    joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
-                    up_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
+                # for idx in key_links:
+                #     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
+                #     up_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
 
                 # self.goal_motion_times가 etime을 over 했을 때 --> 그 해당하는 env에 새로운 reference의 motion_ids, stime, etime 넣어주기!
                 over_etime = torch.nonzero(self.goal_motion_times[:, 0] - self.etime[:, 0] > 0.001).view(-1)
@@ -1961,14 +1970,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 # motion_ids, motion_times = ref_motion.sample(n_inst, truncate_time=dt*(ob_horizon-1))
                 other_root_tensor, other_link_tensor, other_joint_tensor = ref_motion.state(self.lowerbody_goal_motion_ids.cpu().numpy(), self.motion_times.cpu().numpy())
                 link_tensor[..., key_links, :] = other_link_tensor[..., key_links, :]
-                for idx in key_links:
-                    joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
-                    other_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
+                # for idx in key_links:
+                #     joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :] = \
+                #     other_joint_tensor[..., self.DOF_OFFSET[idx]:self.DOF_OFFSET[idx+1], :]
 
         # 현재 goal_link_tensor
         self.goal_root_tensor[env_ids] = root_tensor
         self.goal_link_tensor[env_ids] = link_tensor
-        self.goal_joint_tensor[env_ids] = joint_tensor
+        # self.goal_joint_tensor[env_ids] = joint_tensor
         
         self.lbody_goal_root_tensor[env_ids] = other_root_tensor
 
@@ -2276,6 +2285,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
     def visualize_control_positions(self, isRef=True):
         ee_links = [2, 5, 8, 0]
+        if "tennis" in self.character_model: 
+            ee_links[2] = 9
         if isRef:        
             ee_pos = self.goal_link_pos[:, ee_links, :]      # [num_envs, 3, ee_links]
             ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
@@ -2318,7 +2329,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     
     def visualize_goal_positions_wrt_curr(self):
         up_ee_links = [3, 4, 5]
-        l_key_links = [6, 7, 8]
+        l_key_links = [7, 8, 9] if "tennis" in self.character_model else [6, 7, 8]
         pelvis_key_links = [1, 2]
         lower_key_links = [9, 10, 11, 12, 13, 14]
 
@@ -2334,7 +2345,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         hmd_pos      = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))
         rcontrol_pos = ee_pos[:, 5] + rotatepoint(ee_rot[:, 5], self.r_lpos.to(self.device))
-        lcontrol_pos = ee_pos[:, 8] + rotatepoint(ee_rot[:, 8], self.l_lpos.to(self.device))
+        lcontrol_pos = ee_pos[:, l_key_links[2]] + rotatepoint(ee_rot[:, l_key_links[2]], self.l_lpos.to(self.device))
 
         ego_hmd_pos = global_to_ego(goal_root_pos, goal_root_rot, hmd_pos, 2)  # [num_envs, 3]
         ego_rcontrol_pos = global_to_ego(goal_root_pos, goal_root_rot, rcontrol_pos, 2)  # [num_envs, 3]
@@ -2790,9 +2801,6 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         self.visualize_heading_dir()
         self.visualize_facing_dir()
         
-
-
-
 @torch.jit.script
 def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor, 
                         heading_tensor: torch.Tensor, fps: int):
@@ -3160,3 +3168,25 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
         self._strike_body_ids = self._build_strike_body_ids_tensor(self.envs[0], self.actors[0], self.strike_body_names)
         self._build_target_tensors()
         return 
+
+class HumanoidTennisVR(ICCGANHumanoidVR):
+    CHARACTER_MODEL = "assets/cml_humanoid_tennis.xml"
+    CONTROLLABLE_LINKS = ["torso", "head",                      # 2
+        "right_upper_arm", "right_lower_arm", "right_hand",     # 3
+        "left_upper_arm", "left_lower_arm",         # 3
+        "right_thigh", "right_shin", "right_foot",              # 3
+        "left_thigh", "left_shin", "left_foot"]                 # 3
+    DOFS =  [3, 3, 
+            3, 1, 3, 
+            3, 1, 
+            3, 1, 3, 
+            3, 1, 3]
+        #pelvis # torso
+    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
+                    6,  9,  10, 13,                 # "right_upper_arm", "right_lower_arm", "right_hand", "racket"
+                    13, 16, 17,                     # "left_upper_arm", "left_lower_arm", "left_hand"
+                    17, 20, 21,                     # "right_thigh", "right_shin", "right_foot",
+                    24, 27, 30, 31                  # "left_thigh", "left_shin", "left_foot"
+                    ] 
+    print(CONTROLLABLE_LINKS)
+                    
