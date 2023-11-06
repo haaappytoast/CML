@@ -195,7 +195,9 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_F, "TOGGLE_CAMERA_FOLLOWING")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "TOGGLE_PAUSE")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_D, "SINGLE_STEP_ADVANCE")
-    
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "FullBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "Default")
+
     def update_viewer(self):
         self.gym.poll_viewer_events(self.viewer)
         for event in self.gym.query_viewer_action_events(self.viewer):
@@ -207,6 +209,10 @@ class Env(object):
                 self.viewer_pause = not self.viewer_pause
             if event.action == "SINGLE_STEP_ADVANCE" and event.value > 0:
                 self.viewer_advance = not self.viewer_advance
+            if event.action == "FullBody" and event.value > 0:
+                self.full = True
+            if event.action == "Default" and event.value > 0:
+                self.full = False               
         if self.camera_following: self.update_camera()
         self.gym.step_graphics(self.sim)
 
@@ -850,13 +856,16 @@ def observe_disc(state_hist: torch.Tensor, seq_len: torch.Tensor, key_links: Opt
 class HumanoidView(ICCGANHumanoid):
     
     RANDOM_INIT = False
+
     def create_motion_info(self):
         self.motion_ids = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
         self.motion_times = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
+        self.full = False
 
 
     def update_viewer(self):
         super().update_viewer()
+
         self.gym.clear_lines(self.viewer)
 
         # self.visualize_ee_positions()
@@ -869,9 +878,43 @@ class HumanoidView(ICCGANHumanoid):
         forces = torch.zeros_like(actions)
         force_tensor = gymtorch.unwrap_tensor(forces)
         self.gym.set_dof_actuation_force_tensor(self.sim, force_tensor)
+    
+    def set_char_color(self, col, env_ids, key_links=None):
+        n_links = self.char_link_tensor.size(1) 
+        for env_id in env_ids:
+            env_ptr = self.envs[env_id]
+            handle = self.actors[env_id]
+
+        if len(env_ids):
+            if key_links is None:
+                for j in range(n_links):
+                    self.gym.set_rigid_body_color(env_ptr, handle, j, gymapi.MESH_VISUAL,
+                                                gymapi.Vec3(col[0], col[1], col[2]))
+            else:
+                for j in key_links:
+                    self.gym.set_rigid_body_color(env_ptr, handle, j, gymapi.MESH_VISUAL,
+                                                gymapi.Vec3(col[0], col[1], col[2]))
+        return
+    
+    def return_key_links(self):
+        # get motion length from goal_motion_ids
+        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
+            if "upper" in discs[0].name or "full" in discs[0].name:
+                up_key_links = discs[0].key_links
+        return up_key_links
 
     def step(self, actions):
         self.state_hist[:-1] = self.state_hist[1:].clone()
+        env_ids = list(range(len(self.envs)))
+
+        if self.viewer is not None: 
+            up_key_links = self.return_key_links()
+
+            if (self.full):
+                # self.set_char_color([1.0, 0.5, 0.5], env_ids, up_key_links)
+                self.set_char_color([0.0, 0.0, 0.0], env_ids, up_key_links)
+            else:
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
 
         ### Env step
         obs, rews, dones, info = super().step(actions)
