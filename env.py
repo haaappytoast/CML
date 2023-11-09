@@ -2947,7 +2947,9 @@ def observe_ubody_goal(state_hist: torch.Tensor, target_tensor: torch.Tensor,
     #! lcontrol position difference w.r.t. root orient 
     if ((rlh_coeffs[1])):
         # 1. get lcontrol_dp (target_pos - left control pos of last frame)
-        lhand_idx = 8
+        #! heuristic for tennis!!!!
+        lhand_idx = 8 if state_hist.size(-1) == 208 else 9
+
         lstart_idx = 13 + lhand_idx*13
         lhand_pos = state_hist[-1, :, lstart_idx:lstart_idx+3]
         lhand_orient = state_hist[-1, :, lstart_idx+3:lstart_idx+7]
