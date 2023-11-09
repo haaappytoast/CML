@@ -1890,7 +1890,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         # self.visualize_ee_positions()
-        #self.visualize_goal_positions_wrt_curr()
+        self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -3052,7 +3052,7 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
     STRIKE_BODY_NAMES = ["right_hand", "right_lower_arm"]
 
     def __init__(self, *args, 
-                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
+                sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
 
         self.sensor_inputs = sensor_inputs
@@ -3190,3 +3190,22 @@ class HumanoidTennisVR(ICCGANHumanoidVR):
                     ] 
     print(CONTROLLABLE_LINKS)
                     
+class HumanoidTennisVRControl(ICCGANHumanoidVRControl):
+    CHARACTER_MODEL = "assets/cml_humanoid_tennis.xml"
+    CONTROLLABLE_LINKS = ["torso", "head",                      # 2
+        "right_upper_arm", "right_lower_arm", "right_hand",     # 3
+        "left_upper_arm", "left_lower_arm",         # 3
+        "right_thigh", "right_shin", "right_foot",              # 3
+        "left_thigh", "left_shin", "left_foot"]                 # 3
+    DOFS =  [3, 3, 
+            3, 1, 3, 
+            3, 1, 
+            3, 1, 3, 
+            3, 1, 3]
+        #pelvis # torso
+    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
+                    6,  9,  10, 13,                 # "right_upper_arm", "right_lower_arm", "right_hand", "racket"
+                    13, 16, 17,                     # "left_upper_arm", "left_lower_arm", "left_hand"
+                    17, 20, 21,                     # "right_thigh", "right_shin", "right_foot",
+                    24, 27, 30, 31                  # "left_thigh", "left_shin", "left_foot"
+                    ] 
