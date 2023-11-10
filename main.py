@@ -3,7 +3,7 @@ import importlib
 from collections import namedtuple
 
 import env
-from models import ACModel, Discriminator
+from models import ACModel, Discriminator, ACModel_gembed
 
 import torch
 import numpy as np
@@ -584,7 +584,11 @@ if __name__ == "__main__":
                 env.episode_length = 300
 
     value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
-    model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)
+    if env.goal_embedding:
+        model = ACModel_gembed(env.state_dim, env.act_dim, env.goal_dim, env.upper_goal_dim, env.lower_goal_dim, value_dim)
+    else:
+        model = ACModel(env.state_dim, env.act_dim, env.goal_dim, value_dim)
+    
     discriminators = torch.nn.ModuleDict({
         name: Discriminator(dim) for name, dim in env.disc_dim.items()
     })

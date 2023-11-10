@@ -85,14 +85,6 @@ class Discriminator(torch.nn.Module):
     def __init__(self, disc_dim, latent_dim=256):
         super().__init__()
         self.rnn = torch.nn.GRU(disc_dim, latent_dim, batch_first=True)
-        '''
-        self.rnn = torch.nn.Sequential(
-            torch.nn.Linear(disc_dim, 512),
-            torch.nn.ReLU6(),
-            torch.nn.Linear(512, latent_dim)     # value_dim = critic 개수
-            
-        )   
-        '''
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(latent_dim, 256),
             torch.nn.ReLU(),
@@ -276,3 +268,199 @@ class ACModel(torch.nn.Module):
         if g is not None:
             g = g[...,:self.goal_dim]
         return pi, self.eval_(s, seq_end_frame, g, unnorm)
+
+
+class ACModel_gembed(torch.nn.Module):
+
+    class Critic(torch.nn.Module):
+        def __init__(self, state_dim, goal_dim, upper_g_dim, lower_g_dim, value_dim=1, latent_dim=256, glatent_dim = 64):
+            super().__init__()
+            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
+
+            self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(latent_dim+glatent_dim+lower_g_dim, 1024),
+                torch.nn.ReLU6(),
+                torch.nn.Linear(1024, 512),
+                torch.nn.ReLU6(),
+                torch.nn.Linear(512, value_dim)     # value_dim = critic 개수
+            )
+            i = 0
+            for n, p in self.mlp.named_parameters():
+                if "bias" in n:
+                    torch.nn.init.constant_(p, 0.)
+                elif "weight" in n:
+                    torch.nn.init.uniform_(p, -0.0001, 0.0001)
+                    i += 1
+            self.all_inst = torch.arange(0)
+
+        def forward(self, s, seq_end_frame, upper_g=None, lower_g=None):
+            if self.rnn is None:
+                s = s.view(s.size(0), -1)
+            else:
+                n_inst = s.size(0)
+                if n_inst > self.all_inst.size(0):
+                    self.all_inst = torch.arange(n_inst, 
+                        dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+                s, _ = self.rnn(s)
+                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
+            
+            if upper_g is not None:
+                if self.rnn_g is None:
+                    upper_g = upper_g.view(upper_g.size(0), -1)
+                else:
+                    n_inst = upper_g.size(0)
+                    if n_inst > self.all_inst.size(0):
+                        self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+                upper_g, _ = self.rnn_g(upper_g)          
+                upper_g = upper_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=upper_g.size(1)-1))] # output g [n_envs, 64]
+
+            if upper_g is not None:
+                s = torch.cat((s, upper_g), -1)     # 256 + 64
+            if lower_g is not None:
+                s = torch.cat((s, lower_g), -1)     # 256 + 64 + 8
+            return self.mlp(s)
+
+    class Actor(torch.nn.Module):
+        def __init__(self, state_dim, act_dim, goal_dim, upper_g_dim, lower_g_dim, latent_dim=256, glatent_dim = 64, init_mu=None, init_sigma=None):
+            super().__init__()
+            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
+            self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
+
+            self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(latent_dim+glatent_dim+lower_g_dim, 1024),
+                torch.nn.ReLU6(),
+                torch.nn.Linear(1024, 512),
+                torch.nn.ReLU6()
+            )
+            self.mu = torch.nn.Linear(512, act_dim)
+            self.log_sigma = torch.nn.Linear(512, act_dim)
+            with torch.no_grad():
+                if init_mu is not None:
+                    if torch.is_tensor(init_mu):
+                        mu = torch.ones_like(self.mu.bias)*init_mu
+                    else:
+                        mu = np.ones(self.mu.bias.shape, dtype=np.float32)*init_mu
+                        mu = torch.from_numpy(mu)
+                    self.mu.bias.data.copy_(mu)
+                    torch.nn.init.uniform_(self.mu.weight, -0.00001, 0.00001)
+                if init_sigma is None:
+                    torch.nn.init.constant_(self.log_sigma.bias, -3)
+                    torch.nn.init.uniform_(self.log_sigma.weight, -0.0001, 0.0001)
+                else:
+                    if torch.is_tensor(init_sigma):
+                        log_sigma = (torch.ones_like(self.log_sigma.bias)*init_sigma).log_()
+                    else:
+                        log_sigma = np.log(np.ones(self.log_sigma.bias.shape, dtype=np.float32)*init_sigma)
+                        log_sigma = torch.from_numpy(log_sigma)
+                    self.log_sigma.bias.data.copy_(log_sigma)
+                    torch.nn.init.uniform_(self.log_sigma.weight, -0.00001, 0.00001)
+                self.all_inst = torch.arange(0)
+
+        def forward(self, s, seq_end_frame, upper_g=None, lower_g=None):
+            if self.rnn is None:
+                s = s.view(s.size(0), -1)
+            else:
+                n_inst = s.size(0)
+                if n_inst > self.all_inst.size(0):
+                    self.all_inst = torch.arange(n_inst, 
+                        dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+                s, _ = self.rnn(s)          # output s [n, 4, 256]
+                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))] # output s [n_envs, 256]
+            
+            if upper_g is not None:
+                if self.rnn_g is None:
+                    upper_g = upper_g.view(upper_g.size(0), -1)
+                else:
+                    n_inst = upper_g.size(0)
+                    if n_inst > self.all_inst.size(0):
+                        self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+                upper_g, _ = self.rnn_g(upper_g)          
+                upper_g = upper_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=upper_g.size(1)-1))] # output g [n_envs, 64]
+
+            if upper_g is not None:
+                s = torch.cat((s, upper_g), -1)     # 256 + 64
+            if lower_g is not None:
+                s = torch.cat((s, lower_g), -1)     # 256 + 64 + 8
+
+            latent = self.mlp(s)
+            mu = self.mu(latent)
+            sigma = torch.exp(self.log_sigma(latent)) + 1e-8
+            return torch.distributions.Normal(mu, sigma)
+
+    def __init__(self, state_dim: int, act_dim: int, goal_dim: int=0, upper_goal_dim: int=0, lower_goal_dim: int=0, value_dim: int=1, 
+        normalize_value: bool=True,
+        init_mu:Optional[torch.Tensor or float]=None, init_sigma:Optional[torch.Tensor or float]=None
+    ):
+        super().__init__()
+        self.state_dim = state_dim
+        self.goal_dim = goal_dim
+        self.upper_goal_dim = upper_goal_dim
+        self.lower_goal_dim = lower_goal_dim
+        self.actor = self.Actor(state_dim, act_dim, self.goal_dim, self.upper_goal_dim, self.lower_goal_dim, init_mu=init_mu, init_sigma=init_sigma)
+        self.critic = self.Critic(state_dim, goal_dim, self.upper_goal_dim, self.lower_goal_dim, value_dim)
+        self.ob_normalizer = RunningMeanStd(state_dim, clamp=5.0)
+        if normalize_value:            
+            self.value_normalizer = DiagonalPopArt(value_dim, 
+                self.critic.mlp[-1].weight, self.critic.mlp[-1].bias)
+        else:
+            self.value_normalizer = None
+            
+    def observe(self, obs, norm=True):
+        if self.goal_dim > 0:
+            s = obs[:, :-self.goal_dim]
+            g = obs[:, -self.goal_dim:]
+        else:
+            s = obs
+            g = None
+        s = s.view(*s.shape[:-1], -1, self.state_dim)
+
+        #! embedding!!!!
+        upper_g = g[:, :-self.lower_goal_dim]
+        lower_g = g[:, -self.lower_goal_dim:]
+
+        upper_g = upper_g.view(upper_g.shape[0], -1, self.upper_goal_dim)       # [n_envs, ob_horizon, upper_goal_dim]
+        return self.ob_normalizer(s) if norm else s, upper_g, lower_g
+
+    # get value
+    def eval_(self, s, seq_end_frame, upper_g, lower_g, unnorm):
+        v = self.critic(s, seq_end_frame, upper_g, lower_g)
+        if unnorm and self.value_normalizer is not None:
+            v = self.value_normalizer(v, unnorm=True)
+        return v
+
+    def act(self, obs, seq_end_frame, stochastic=None, unnorm=False):
+        if stochastic is None:
+            stochastic = self.training
+        s, upper_g, lower_g = self.observe(obs)            # normalize state
+        pi = self.actor(s, seq_end_frame, upper_g, lower_g)    # forward of Actor, outputs normal distribution
+        if stochastic:
+            a = pi.sample()
+            lp = pi.log_prob(a)
+            #! embedding!!!!
+            if upper_g is not None:
+                upper_g = upper_g
+            if lower_g is not None:
+                lower_g = lower_g
+                # g = g[...,:self.goal_dim]
+            return a, self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm), lp   # actions, values, log_probs
+        else:
+            return pi.mean,     # [num_envs, action_dim]
+
+    def evaluate(self, obs, seq_end_frame, unnorm=False):
+        s, upper_g, lower_g = self.observe(obs)                        # normalize state
+        if upper_g is not None:
+            upper_g = upper_g
+        if lower_g is not None:
+            lower_g = lower_g
+
+        return self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm)  # get value
+    
+    def forward(self, obs, seq_end_frame, unnorm=False):
+        s, upper_g, lower_g = self.observe(obs)                    # normalize state
+        pi = self.actor(s, seq_end_frame, upper_g, lower_g)
+        if upper_g is not None:
+            upper_g = upper_g
+        if lower_g is not None:
+            lower_g = lower_g
+        return pi, self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm)
