@@ -41,15 +41,15 @@ sensor_input = {
     "test" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/joystick1"
+        joystick = "/Unity_postprocess/joystick_input/joystick2"
     )
 }
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1113_blocking.yaml",
         # motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
-        # motion_file = "assets/retargeted/test/blocking_test/cml@allinone.npy",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@blocking2.npy",
+        motion_file = "assets/retargeted/1114_block.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
