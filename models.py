@@ -273,7 +273,7 @@ class ACModel(torch.nn.Module):
 class ACModel_gembed(torch.nn.Module):
 
     class Critic(torch.nn.Module):
-        def __init__(self, state_dim, goal_dim, upper_g_dim, lower_g_dim, value_dim=1, latent_dim=256, glatent_dim = 64):
+        def __init__(self, state_dim, goal_dim, upper_g_dim, lower_g_dim, value_dim=1, latent_dim=256, glatent_dim = 16):
             super().__init__()
             self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
             self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
@@ -322,7 +322,7 @@ class ACModel_gembed(torch.nn.Module):
             return self.mlp(s)
 
     class Actor(torch.nn.Module):
-        def __init__(self, state_dim, act_dim, goal_dim, upper_g_dim, lower_g_dim, latent_dim=256, glatent_dim = 64, init_mu=None, init_sigma=None):
+        def __init__(self, state_dim, act_dim, goal_dim, upper_g_dim, lower_g_dim, latent_dim=256, glatent_dim = 16, init_mu=None, init_sigma=None):
             super().__init__()
             self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
             self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
