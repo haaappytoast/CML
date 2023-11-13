@@ -1,0 +1,95 @@
+motions:
+# 3
+- file: 1018_blocking/cml@Blocking1.npy
+  weight: null
+- file: 1018_blocking/cml@Blocking2.npy
+  weight: null
+- file: 1018_blocking/cml@Blocking3.npy
+  weight: null
+
+# 12
+- file: 1013_blocking/cml@Blocking1.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking1_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking2.npy
+  weight: null
+- file: 1013_blocking/cml@Blocking2_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@BodyBlock.npy
+  weight: null
+- file: 1013_blocking/cml@BodyBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@InwardBlock.npy
+  weight: null
+- file: 1013_blocking/cml@InwardBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@OutwardBlock.npy
+  weight: null
+- file: 1013_blocking/cml@OutwardBlock_mirrored.npy
+  weight: null
+- file: 1013_blocking/cml@StandingBlockIdle.npy
+  weight: null
+- file: 1013_blocking/cml@StandingBlockIdle_mirrored.npy
+  weight: null
+# 28
+- file: 1018_blocking/cml@outblock (1).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (2).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (3).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (4).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (5).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (6).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (7).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (8).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (9).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (10).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (11).npy
+  weight: null
+- file: 1018_blocking/cml@outblock (12).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (1).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (2).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (3).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (4).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (5).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (6).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (7).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (8).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (9).npy
+  weight: null
+- file: 1018_blocking/cml@outblock_reverse (10).npy
+  weight: null
+- file: test/blocking_test/cml@allinone.npy
+  weight: null
+- file: test/blocking_test/cml@blocking1.npy
+  weight: null
+- file: test/blocking_test/cml@blocking2.npy
+  weight: null
+- file: test/blocking_test/cml@outward_block+blocking2.npy
+  weight: null
+- file: test/blocking_test/cml@allinone.npy
+  weight: null
+- file: test/blocking_test/cml@blocking1.npy
+  weight: null
+- file: test/blocking_test/cml@blocking2.npy
+  weight: null
+- file: test/blocking_test/cml@outward_block+blocking2.npy
+  weight: null

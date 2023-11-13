@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/blocking_joystick.py --ckpt 1018_blocking_joystick --headless --server carefree
+# python main.py config/blocking_joystick.py --ckpt 1113_block_MIX+REAL --headless --server local
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -13,12 +13,13 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
-    goal_termination = True
+    goal_termination = False,
+    goal_embedding = True
 )
 
 training_params = dict(
     max_epochs = 30000,
-    save_interval = 1000,
+    save_interval = 5000,
     terminate_reward = -1
 )
 
@@ -31,7 +32,7 @@ reward_coeff = dict(
     facing = 0.3            # 2
 )
 
-sensor_input = { 
+sensor_input = {
     "train" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
@@ -46,8 +47,9 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        # motion_file = "assets/retargeted/1018_blocking.yaml",
-        motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
+        motion_file = "assets/retargeted/1113_blocking.yaml",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
+        # motion_file = "assets/retargeted/test/blocking_test/cml@allinone.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
