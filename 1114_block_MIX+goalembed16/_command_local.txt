@@ -1,0 +1,4 @@
+python main.py config/blocking_joystick.py --ckpt 1114_block_MIX+goalembed16 --headless --server local
+
+시작 날짜: 2023-11-14
+시작 시각: 2:59:27
