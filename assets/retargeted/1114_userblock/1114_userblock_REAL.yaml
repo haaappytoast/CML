@@ -1,0 +1,22 @@
+motions:
+#! idle block
+- file: cml@user_idleblock0.npy
+  weight: null
+- file: cml@user_idleblock1.npy
+  weight: null
+#! inblock
+- file: cml@user_inblock2.npy
+  weight: null
+- file: cml@user_inblock2_reverse.npy
+  weight: null
+#! outblock
+- file: cml@user_outblock3.npy
+  weight: null
+- file: cml@user_outblock3_reverse.npy
+  weight: null
+
+##! TEST Motions
+# - file: cml@user_outblock_TEST.npy
+#   weight: null
+# - file: cml@user_inoutblock_TEST2.npy
+#   weight: null
