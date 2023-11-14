@@ -400,6 +400,7 @@ class ACModel_gembed(torch.nn.Module):
         self.actor = self.Actor(state_dim, act_dim, self.goal_dim, self.upper_goal_dim, self.lower_goal_dim, init_mu=init_mu, init_sigma=init_sigma)
         self.critic = self.Critic(state_dim, goal_dim, self.upper_goal_dim, self.lower_goal_dim, value_dim)
         self.ob_normalizer = RunningMeanStd(state_dim, clamp=5.0)
+        self.goal_normalizer = RunningMeanStd(upper_goal_dim, clamp=5.0)
         if normalize_value:            
             self.value_normalizer = DiagonalPopArt(value_dim, 
                 self.critic.mlp[-1].weight, self.critic.mlp[-1].bias)
@@ -420,7 +421,8 @@ class ACModel_gembed(torch.nn.Module):
         lower_g = g[:, -self.lower_goal_dim:]
 
         upper_g = upper_g.view(upper_g.shape[0], -1, self.upper_goal_dim)       # [n_envs, ob_horizon, upper_goal_dim]
-        return self.ob_normalizer(s) if norm else s, upper_g, lower_g
+        return self.ob_normalizer(s) if norm else s, self.goal_normalizer(upper_g) if norm else upper_g, lower_g
+    
 
     # get value
     def eval_(self, s, seq_end_frame, upper_g, lower_g, unnorm):
