@@ -279,7 +279,7 @@ class ACModel_gembed(torch.nn.Module):
             self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
 
             self.mlp = torch.nn.Sequential(
-                torch.nn.Linear(latent_dim+glatent_dim+lower_g_dim, 1024),
+                torch.nn.Linear(latent_dim+glatent_dim+upper_g_dim+lower_g_dim, 1024),
                 torch.nn.ReLU6(),
                 torch.nn.Linear(1024, 512),
                 torch.nn.ReLU6(),
@@ -294,7 +294,7 @@ class ACModel_gembed(torch.nn.Module):
                     i += 1
             self.all_inst = torch.arange(0)
 
-        def forward(self, s, seq_end_frame, upper_g=None, lower_g=None):
+        def forward(self, s, seq_end_frame, embed_g = None, upper_g=None, lower_g=None):
             if self.rnn is None:
                 s = s.view(s.size(0), -1)
             else:
@@ -305,20 +305,23 @@ class ACModel_gembed(torch.nn.Module):
                 s, _ = self.rnn(s)
                 s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
             
-            if upper_g is not None:
+            if embed_g is not None:
                 if self.rnn_g is None:
-                    upper_g = upper_g.view(upper_g.size(0), -1)
+                    embed_g = embed_g.view(embed_g.size(0), -1)
                 else:
-                    n_inst = upper_g.size(0)
+                    n_inst = embed_g.size(0)
                     if n_inst > self.all_inst.size(0):
                         self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                upper_g, _ = self.rnn_g(upper_g)          
-                upper_g = upper_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=upper_g.size(1)-1))] # output g [n_envs, 64]
+                embed_g, _ = self.rnn_g(embed_g)          
+                embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 64]
 
+            if embed_g is not None:
+                s = torch.cat((s, embed_g), -1)     # 256 + 16
             if upper_g is not None:
-                s = torch.cat((s, upper_g), -1)     # 256 + 64
+                s = torch.cat((s, upper_g), -1)     # 256 + 16 + 18
             if lower_g is not None:
-                s = torch.cat((s, lower_g), -1)     # 256 + 64 + 8
+                s = torch.cat((s, lower_g), -1)     # 256 + 16 + 18 + 8
+
             return self.mlp(s)
 
     class Actor(torch.nn.Module):
@@ -328,7 +331,7 @@ class ACModel_gembed(torch.nn.Module):
             self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
 
             self.mlp = torch.nn.Sequential(
-                torch.nn.Linear(latent_dim+glatent_dim+lower_g_dim, 1024),
+                torch.nn.Linear(latent_dim+glatent_dim+upper_g_dim+lower_g_dim, 1024),
                 torch.nn.ReLU6(),
                 torch.nn.Linear(1024, 512),
                 torch.nn.ReLU6()
@@ -357,7 +360,7 @@ class ACModel_gembed(torch.nn.Module):
                     torch.nn.init.uniform_(self.log_sigma.weight, -0.00001, 0.00001)
                 self.all_inst = torch.arange(0)
 
-        def forward(self, s, seq_end_frame, upper_g=None, lower_g=None):
+        def forward(self, s, seq_end_frame, embed_g=None, upper_g=None, lower_g=None):
             if self.rnn is None:
                 s = s.view(s.size(0), -1)
             else:
@@ -368,20 +371,22 @@ class ACModel_gembed(torch.nn.Module):
                 s, _ = self.rnn(s)          # output s [n, 4, 256]
                 s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))] # output s [n_envs, 256]
             
-            if upper_g is not None:
+
+            if embed_g is not None:
                 if self.rnn_g is None:
-                    upper_g = upper_g.view(upper_g.size(0), -1)
+                    embed_g = embed_g.view(embed_g.size(0), -1)
                 else:
-                    n_inst = upper_g.size(0)
+                    n_inst = embed_g.size(0)
                     if n_inst > self.all_inst.size(0):
                         self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                upper_g, _ = self.rnn_g(upper_g)          
-                upper_g = upper_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=upper_g.size(1)-1))] # output g [n_envs, 64]
-
+                embed_g, _ = self.rnn_g(embed_g)          
+                embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 16]
+            if embed_g is not None:
+                s = torch.cat((s, embed_g), -1)     # 256 + 16
             if upper_g is not None:
-                s = torch.cat((s, upper_g), -1)     # 256 + 64
+                s = torch.cat((s, upper_g), -1)     # 256 + 16 + 18
             if lower_g is not None:
-                s = torch.cat((s, lower_g), -1)     # 256 + 64 + 8
+                s = torch.cat((s, lower_g), -1)     # 256 + 16 + 18 + 8
 
             latent = self.mlp(s)
             mu = self.mu(latent)
@@ -417,16 +422,17 @@ class ACModel_gembed(torch.nn.Module):
         s = s.view(*s.shape[:-1], -1, self.state_dim)
 
         #! embedding!!!!
-        upper_g = g[:, :-self.lower_goal_dim]
+        embed_g = g[:, :-(self.upper_goal_dim+self.lower_goal_dim)]
+        upper_g = g[:, -(self.upper_goal_dim+self.lower_goal_dim):-self.lower_goal_dim]
         lower_g = g[:, -self.lower_goal_dim:]
 
-        upper_g = upper_g.view(upper_g.shape[0], -1, self.upper_goal_dim)       # [n_envs, ob_horizon, upper_goal_dim]
-        return self.ob_normalizer(s) if norm else s, self.goal_normalizer(upper_g) if norm else upper_g, lower_g
+        embed_g = embed_g.view(embed_g.shape[0], -1, self.upper_goal_dim)       # [n_envs, ob_horizon, upper_goal_dim]
+        return self.ob_normalizer(s) if norm else s, self.goal_normalizer(embed_g) if norm else embed_g, upper_g, lower_g
     
 
     # get value
-    def eval_(self, s, seq_end_frame, upper_g, lower_g, unnorm):
-        v = self.critic(s, seq_end_frame, upper_g, lower_g)
+    def eval_(self, s, seq_end_frame, embed_g, upper_g, lower_g, unnorm):
+        v = self.critic(s, seq_end_frame, embed_g, upper_g, lower_g)
         if unnorm and self.value_normalizer is not None:
             v = self.value_normalizer(v, unnorm=True)
         return v
@@ -434,35 +440,42 @@ class ACModel_gembed(torch.nn.Module):
     def act(self, obs, seq_end_frame, stochastic=None, unnorm=False):
         if stochastic is None:
             stochastic = self.training
-        s, upper_g, lower_g = self.observe(obs)            # normalize state
-        pi = self.actor(s, seq_end_frame, upper_g, lower_g)    # forward of Actor, outputs normal distribution
+        s, embed_g, upper_g, lower_g = self.observe(obs)            # normalize state
+        pi = self.actor(s, seq_end_frame, embed_g, upper_g, lower_g)    # forward of Actor, outputs normal distribution
         if stochastic:
             a = pi.sample()
             lp = pi.log_prob(a)
             #! embedding!!!!
+            if embed_g is not None:
+                embed_g = embed_g
             if upper_g is not None:
                 upper_g = upper_g
             if lower_g is not None:
                 lower_g = lower_g
                 # g = g[...,:self.goal_dim]
-            return a, self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm), lp   # actions, values, log_probs
+            return a, self.eval_(s, seq_end_frame, embed_g, upper_g, lower_g, unnorm), lp   # actions, values, log_probs
         else:
             return pi.mean,     # [num_envs, action_dim]
 
     def evaluate(self, obs, seq_end_frame, unnorm=False):
-        s, upper_g, lower_g = self.observe(obs)                        # normalize state
+        s, embed_g, upper_g, lower_g = self.observe(obs)                        # normalize state
+        if embed_g is not None:
+            embed_g = embed_g
         if upper_g is not None:
             upper_g = upper_g
         if lower_g is not None:
             lower_g = lower_g
 
-        return self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm)  # get value
+        return self.eval_(s, seq_end_frame, embed_g, upper_g, lower_g, unnorm)  # get value
     
     def forward(self, obs, seq_end_frame, unnorm=False):
-        s, upper_g, lower_g = self.observe(obs)                    # normalize state
-        pi = self.actor(s, seq_end_frame, upper_g, lower_g)
+        s, embed_g, upper_g, lower_g = self.observe(obs)                    # normalize state
+
+        pi = self.actor(s, seq_end_frame, embed_g, upper_g, lower_g)
+        if embed_g is not None:
+            embed_g = embed_g
         if upper_g is not None:
             upper_g = upper_g
         if lower_g is not None:
             lower_g = lower_g
-        return pi, self.eval_(s, seq_end_frame, upper_g, lower_g, unnorm)
+        return pi, self.eval_(s, seq_end_frame, embed_g, upper_g, lower_g, unnorm)

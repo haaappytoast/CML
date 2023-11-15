@@ -291,20 +291,21 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
                 real_loss = real_losses[name]
                 fake_loss = fake_losses[name]
                 opt = disc_optimizer[name]
-                if len(ref) != n_samples:
-                    n_samples = len(ref)
-                    idx = torch.randperm(n_samples)
-                for batch in range(n_samples//BATCH_SIZE):
+                if len(ref) != n_samples:                        
+                    n_samples = len(ref)                        # n_samples = 4096 (PPO replay buffer size)
+                    idx = torch.randperm(n_samples) 
+                for batch in range(n_samples//BATCH_SIZE):      # BATCH_SIZE = 256 (PPO batch size)
                     sample = idx[batch*BATCH_SIZE:(batch+1)*BATCH_SIZE]
-                    r = ref[sample]
-                    f = ob[sample]
+                    r = ref[sample]                             # [4096, 3, 56] -> [256, 3, 56]
+                    f = ob[sample]                              # [4096, 3, 56] -> [256, 3, 56]
+                    
                     seq_end_frame = seq_end_frame_[sample]
 
                     score_r = disc(r, seq_end_frame, normalize=False)
                     score_f = disc(f, seq_end_frame, normalize=False)
                 
-                    loss_r = torch.nn.functional.relu(1-score_r).mean()
-                    loss_f = torch.nn.functional.relu(1+score_f).mean()
+                    loss_r = torch.nn.functional.relu(1-score_r).mean()     # reference motions
+                    loss_f = torch.nn.functional.relu(1+score_f).mean()     # simulated motions
 
                     with torch.no_grad():
                         alpha = torch.rand(r.size(0), dtype=r.dtype, device=r.device)
@@ -336,7 +337,7 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
                 else:
                     reward_weights = None
                     rewards = None
-                for name, disc, ob, seq_end_frame in disc_data_raw:
+                for name, disc, ob, seq_end_frame in disc_data_raw:     # [4096, 3, 56]
                     r = (disc(ob, seq_end_frame).clamp_(-1, 1)
                             .mean(-1, keepdim=True))
                     if rewards is None:
@@ -373,7 +374,7 @@ def train(env, model, ckpt_dir, training_params, reward_coeff = None, resumed_op
 
                 log_probs = torch.cat(buffer["lp"])
                 actions = torch.cat(buffer["a"])
-                states = torch.cat(buffer["s"])
+                states = torch.cat(buffer["s"])     # [4096, 860]
                 ob_seq_lens = torch.cat(buffer["ob_seq_len"])
                 ob_seq_end_frames = ob_seq_lens - 1
 
