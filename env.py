@@ -2600,6 +2600,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         self.GOAL_DIM += self.LOWER_GOAL_DIM
         if (self.sensor_ablation):
             print("\n=======\nSENSOR ABLATION TEST!\n=======")
+            self.GOAL_REWARD_WEIGHT = 0.5
 
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
 
