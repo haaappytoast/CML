@@ -275,8 +275,8 @@ class ACModel_gembed(torch.nn.Module):
     class Critic(torch.nn.Module):
         def __init__(self, state_dim, goal_dim, upper_g_dim, lower_g_dim, value_dim=1, latent_dim=256, glatent_dim = 16):
             super().__init__()
-            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
-            self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
+            self.rnn = torch.nn.GRU(state_dim + upper_g_dim, latent_dim + glatent_dim, batch_first=True)
+            #self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
 
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(latent_dim+glatent_dim+upper_g_dim+lower_g_dim, 1024),
@@ -302,21 +302,23 @@ class ACModel_gembed(torch.nn.Module):
                 if n_inst > self.all_inst.size(0):
                     self.all_inst = torch.arange(n_inst, 
                         dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+                if embed_g is not None:
+                    s = torch.cat((s, embed_g), -1)
                 s, _ = self.rnn(s)
                 s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
             
-            if embed_g is not None:
-                if self.rnn_g is None:
-                    embed_g = embed_g.view(embed_g.size(0), -1)
-                else:
-                    n_inst = embed_g.size(0)
-                    if n_inst > self.all_inst.size(0):
-                        self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                embed_g, _ = self.rnn_g(embed_g)          
-                embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 64]
+            # if embed_g is not None:
+            #     if self.rnn_g is None:
+            #         embed_g = embed_g.view(embed_g.size(0), -1)
+            #     else:
+            #         n_inst = embed_g.size(0)
+            #         if n_inst > self.all_inst.size(0):
+            #             self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+            #     embed_g, _ = self.rnn_g(embed_g)          
+            #     embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 64]
 
-            if embed_g is not None:
-                s = torch.cat((s, embed_g), -1)     # 256 + 16
+            # if embed_g is not None:
+            #     s = torch.cat((s, embed_g), -1)     # 256 + 16
             if upper_g is not None:
                 s = torch.cat((s, upper_g), -1)     # 256 + 16 + 18
             if lower_g is not None:
@@ -327,8 +329,8 @@ class ACModel_gembed(torch.nn.Module):
     class Actor(torch.nn.Module):
         def __init__(self, state_dim, act_dim, goal_dim, upper_g_dim, lower_g_dim, latent_dim=256, glatent_dim = 16, init_mu=None, init_sigma=None):
             super().__init__()
-            self.rnn = torch.nn.GRU(state_dim, latent_dim, batch_first=True)
-            self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
+            self.rnn = torch.nn.GRU(state_dim + upper_g_dim, latent_dim + glatent_dim, batch_first=True)
+            #self.rnn_g = torch.nn.GRU(upper_g_dim, glatent_dim, batch_first=True)
 
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(latent_dim+glatent_dim+upper_g_dim+lower_g_dim, 1024),
@@ -368,21 +370,22 @@ class ACModel_gembed(torch.nn.Module):
                 if n_inst > self.all_inst.size(0):
                     self.all_inst = torch.arange(n_inst, 
                         dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                s, _ = self.rnn(s)          # output s [n, 4, 256]
-                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))] # output s [n_envs, 256]
+                if embed_g is not None:
+                    s = torch.cat((s, embed_g), -1)
+                s, _ = self.rnn(s)
+                s = s[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=s.size(1)-1))]
             
-
-            if embed_g is not None:
-                if self.rnn_g is None:
-                    embed_g = embed_g.view(embed_g.size(0), -1)
-                else:
-                    n_inst = embed_g.size(0)
-                    if n_inst > self.all_inst.size(0):
-                        self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
-                embed_g, _ = self.rnn_g(embed_g)          
-                embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 16]
-            if embed_g is not None:
-                s = torch.cat((s, embed_g), -1)     # 256 + 16
+            # if embed_g is not None:
+            #     if self.rnn_g is None:
+            #         embed_g = embed_g.view(embed_g.size(0), -1)
+            #     else:
+            #         n_inst = embed_g.size(0)
+            #         if n_inst > self.all_inst.size(0):
+            #             self.all_inst = torch.arange(n_inst, dtype=seq_end_frame.dtype, device=seq_end_frame.device)
+            #     embed_g, _ = self.rnn_g(embed_g)          
+            #     embed_g = embed_g[(self.all_inst[:n_inst], torch.clip(seq_end_frame, max=embed_g.size(1)-1))] # output g [n_envs, 16]
+            # if embed_g is not None:
+            #     s = torch.cat((s, embed_g), -1)     # 256 + 16
             if upper_g is not None:
                 s = torch.cat((s, upper_g), -1)     # 256 + 16 + 18
             if lower_g is not None:
