@@ -9,7 +9,6 @@ from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView, HumanoidViewTennis
 from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
-from env_proj import ICCGANHumanoidProjectile
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
     return kwargs[key] if key in kwargs else default_val
@@ -950,383 +949,6 @@ def observe_disc(state_hist: torch.Tensor, seq_len: torch.Tensor, key_links: Opt
     mask2 = arange < seq_len_
     ob2[mask2] = ob1[mask1]
     return ob2              # ob2.shape:  For each Discriminator: [N_ENVS, n_horizons, n_KEY_links * 7] 
-
-
-
-class ICCGANHumanoidTarget(ICCGANHumanoid):
-
-    GOAL_REWARD_WEIGHT = 0.5
-    GOAL_DIM = 4                    # (x, y, sp, dist)
-    GOAL_TENSOR_DIM = 3             # global position of root target (X, Y, Z) - where root should reach
-    ENABLE_GOAL_TIMER = True
-
-    GOAL_RADIUS = 0.5
-    SP_LOWER_BOUND = 1.2
-    SP_UPPER_BOUND = 1.5
-    GOAL_TIMER_RANGE = 90, 150
-    GOAL_SP_MEAN = 1
-    GOAL_SP_STD = 0.25
-    GOAL_SP_MIN = 0
-    GOAL_SP_MAX = 1.25
-
-    SHARP_TURN_RATE = 1
-
-    def __init__(self, *args, **kwargs):
-        self.goal_radius = parse_kwarg(kwargs, "goal_radius", self.GOAL_RADIUS)
-        self.sharp_turn_rate = parse_kwarg(kwargs, "sharp_turn_rate", self.SHARP_TURN_RATE)
-        self.sp_lower_bound = parse_kwarg(kwargs, "sp_lower_bound", self.SP_LOWER_BOUND)
-        self.sp_upper_bound = parse_kwarg(kwargs, "sp_upper_bound", self.SP_UPPER_BOUND)
-        self.goal_timer_range = parse_kwarg(kwargs, "goal_timer_range", self.GOAL_TIMER_RANGE)
-        self.goal_sp_mean = parse_kwarg(kwargs, "goal_sp_mean", self.GOAL_SP_MEAN)
-        self.goal_sp_std = parse_kwarg(kwargs, "goal_sp_std", self.GOAL_SP_STD)
-        self.goal_sp_min = parse_kwarg(kwargs, "goal_sp_min", self.GOAL_SP_MIN)
-        self.goal_sp_max = parse_kwarg(kwargs, "goal_sp_max", self.GOAL_SP_MAX)
-        super().__init__(*args, **kwargs)
-
-    def update_viewer(self):
-        super().update_viewer()
-        self.gym.clear_lines(self.viewer)
-        n_lines = 10
-        tar_x = self.goal_tensor[:, 0].cpu().numpy()
-
-        p = self.root_pos.cpu().numpy()
-        zero = np.zeros_like(tar_x)+0.05
-        tar_y = self.goal_tensor[:, 1].cpu().numpy()
-        lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, tar_x, tar_y, zero), -1)
-        for i in range(n_lines)], -2)
-        for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 0., 0.] for _ in range(n_lines)])  # red
-        n_lines = 10
-        target_pos = self.goal_tensor.cpu().numpy()
-        lines = np.stack([
-            np.stack((
-                target_pos[:, 0], target_pos[:, 1], zero,
-                target_pos[:, 0]+self.goal_radius*np.cos(2*np.pi/n_lines*i), 
-                target_pos[:, 1]+self.goal_radius*np.sin(2*np.pi/n_lines*i),
-                zero
-            ), -1)
-        for i in range(n_lines)], -2)
-        for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
-    
-    def _observe(self, env_ids):
-        if env_ids is None:
-            return observe_iccgan_target(
-                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
-                self.goal_tensor, self.goal_timer, sp_upper_bound=self.sp_upper_bound, fps=self.fps
-            )
-        else:
-            return observe_iccgan_target(
-                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
-                self.goal_tensor[env_ids], self.goal_timer[env_ids], sp_upper_bound=self.sp_upper_bound, fps=self.fps
-            )
-
-    def reset_goal(self, env_ids, goal_tensor=None, goal_timer=None):
-        #! shallow copy: 이렇게 되면 goal_tensor가 바뀌면 self.goal_tensor도 바뀐다!
-        if goal_tensor is None: goal_tensor = self.goal_tensor
-        if goal_timer is None: goal_timer = self.goal_timer
-        
-        n_envs = len(env_ids)
-        all_envs = n_envs == len(self.envs)
-        root_orient = self.root_orient if all_envs else self.root_orient[env_ids]
-
-        small_turn = torch.rand(n_envs, device=self.device) > self.sharp_turn_rate                      # 0~1 사이 난수 발생
-        large_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(2*np.pi)         # 0~2pi 사이
-        small_angle = torch.rand(n_envs, dtype=torch.float32, device=self.device).sub_(0.5).mul_(2*(np.pi/3))   
-
-        heading = heading_zup(root_orient)
-        small_angle += heading
-        theta = torch.where(small_turn, small_angle, large_angle)   # (condition, input, other)
-
-        timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-        if self.goal_sp_min == self.goal_sp_max:     # juggling+locomotion_walk
-            vel = self.goal_sp_min
-        elif self.goal_sp_std == 0:                  # juggling+locomotion_walk
-            vel = self.goal_sp_mean
-        else:
-            vel = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
-        
-        dist = vel*timer*self.step_time     # 1/fps에서 얼만큼 갈 수 있는가
-        dx = dist*torch.cos(theta)
-        dy = dist*torch.sin(theta)
-
-        if all_envs:
-            self.init_dist = dist
-            goal_timer.copy_(timer)
-            goal_tensor[:,0] = self.root_pos[:,0] + dx
-            goal_tensor[:,1] = self.root_pos[:,1] + dy
-        else:
-            self.init_dist[env_ids] = dist
-            goal_timer[env_ids] = timer
-            goal_tensor[env_ids,0] = self.root_pos[env_ids,0] + dx
-            goal_tensor[env_ids,1] = self.root_pos[env_ids,1] + dy
-        
-    def reward(self, goal_tensor=None, goal_timer=None):
-        if goal_tensor is None: goal_tensor = self.goal_tensor
-        if goal_timer is None: goal_timer = self.goal_timer
-
-        p = self.root_pos                                       # 현재 root_pos
-        p_ = self.state_hist[-1][:, :3]                         # 이전 root_pos (goal_tensor 구했을 때의 root_pos부터 시작!  / action apply 되기 이전)
-
-        dp_ = goal_tensor - p_                                  # root_pos에서 target 지점까지의 global (dx, dy)
-        dp_[:, self.UP_AXIS] = 0
-        dist_ = torch.linalg.norm(dp_, ord=2, dim=-1)
-        v_ = dp_.div_(goal_timer.unsqueeze(-1)*self.step_time)  # v_: desired veloicty (total distance / sec)
-
-        v_mag = torch.linalg.norm(v_, ord=2, dim=-1)
-        sp_ = (dist_/self.step_time).clip_(max=v_mag.clip(min=self.sp_lower_bound, max=self.sp_upper_bound))
-        v_ *= (sp_/v_mag).unsqueeze_(-1)                       # desired velocity
-
-        dp = p - p_                                            # (현재 root - 이전 root)
-        dp[:, self.UP_AXIS] = 0
-        v = dp / self.step_time                                # current velocity: dp / duration 
-        r = (v - v_).square_().sum(1).mul_(-3/(sp_*sp_)).exp_()
-
-        dp = goal_tensor - p
-        dp[:, self.UP_AXIS] = 0
-        dist = torch.linalg.norm(dp, ord=2, dim=-1)
-        self.near = dist < self.goal_radius
-
-        r[self.near] = 1
-        
-        if self.viewer is not None:
-            self.goal_timer[self.near] = self.goal_timer[self.near].clip(max=20)
-        
-        return r.unsqueeze_(-1)
-
-    def termination_check(self, goal_tensor=None):
-        if goal_tensor is None: goal_tensor = self.goal_tensor
-        fall = super().termination_check()
-        dp = goal_tensor - self.root_pos
-        dp[:, self.UP_AXIS] = 0
-        dist = dp.square_().sum(-1).sqrt_()
-        too_far = dist-self.init_dist > 3
-        return torch.logical_or(fall, too_far)
-
-
-@torch.jit.script
-def observe_iccgan_target(state_hist: torch.Tensor, seq_len: torch.Tensor,
-    target_tensor: torch.Tensor, timer: torch.Tensor,
-    sp_upper_bound: float, fps: int
-):
-    ob = observe_iccgan(state_hist, seq_len)
-
-    root_pos = state_hist[-1, :, :3]
-    root_orient = state_hist[-1, :, 3:7]
-
-    dp = target_tensor - root_pos
-    x = dp[:, 0]
-    y = dp[:, 1]
-    heading_inv = -heading_zup(root_orient)
-    c = torch.cos(heading_inv)      # root_orientation의 x-dir의 각도 (inverse) 
-    s = torch.sin(heading_inv)
-    x, y = c*x-s*y, s*x+c*y         # [[c -s], [s c]] * [x y]^T (local_dp -> root_orient에서 바라본 dp)
-
-    dist = (x*x + y*y).sqrt_()
-    sp = dist.mul(fps/timer)        # speed! ... dist/timer->how many dist we should go per step ... dist*fps/timer -> how much distance we should go in 1 sec
-
-    too_close = dist < 1e-5
-    x = torch.where(too_close, x, x/dist)   # x/dist: normalized x
-    y = torch.where(too_close, y, y/dist)
-    sp.clip_(max=sp_upper_bound)
-    dist.div_(3).clip_(max=1.5)
-
-    return torch.cat((ob, x.unsqueeze_(-1), y.unsqueeze_(-1), sp.unsqueeze_(-1), dist.unsqueeze_(-1)), -1)
-
-
-
-class ICCGANHumanoidTargetAiming(ICCGANHumanoidTarget):
-    
-    GOAL_REWARD_WEIGHT = 0.25, 0.25
-    GOAL_DIM = 4+3
-    GOAL_TENSOR_DIM = 3+4
-
-    def create_tensors(self):
-        super().create_tensors()
-        self.hand_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_hand")
-        self.lower_arm_link = self.gym.find_actor_rigid_body_handle(self.envs[0], self.actors[0], "right_lower_arm")
-        self.aiming_start_link = self.lower_arm_link
-        self.aiming_end_link = self.hand_link
-
-
-        self.x_dir = torch.zeros_like(self.root_pos)
-        self.x_dir[..., 0] = 1
-        self.reverse_rotation = torch.zeros_like(self.root_orient)
-        self.reverse_rotation[..., self.UP_AXIS] = 1
-
-    def _observe(self, env_ids):
-        if env_ids is None:
-            return observe_iccgan_target_aiming(
-                self.state_hist[-self.ob_horizon:], self.ob_seq_lens,
-                self.goal_tensor, self.goal_timer,
-                sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
-            )
-        else:
-            return observe_iccgan_target_aiming(
-                self.state_hist[-self.ob_horizon:][:, env_ids], self.ob_seq_lens[env_ids],
-                self.goal_tensor[env_ids], self.goal_timer[env_ids],
-                sp_upper_bound=self.sp_upper_bound, goal_radius=self.goal_radius, fps=self.fps
-            )
-
-    def update_viewer(self):
-        super().update_viewer()
-
-        target_tensor = self.goal_tensor[:, :3]
-        aiming_tensor = self.goal_tensor[:, 3:]
-
-        target_dir = target_tensor - self.root_pos
-        target_dir[..., self.UP_AXIS] = 0
-        dist = torch.linalg.norm(target_dir, ord=2, dim=-1, keepdim=True)
-        not_near = (dist > self.goal_radius).squeeze_(-1)
-        dist = dist[not_near]
-
-        if dist.nelement() < 1: return
-
-        target_dir = target_dir[not_near]
-        target_dir.div_(dist)
-        link_pos = self.link_pos[not_near]
-
-        x_dir = self.x_dir[:target_dir.size(0)]
-        q = quatdiff_normalized(x_dir, target_dir)
-        # ensure 180 degree rotation is around the up axis
-        q = torch.where(target_dir[:, :1] < -0.99999,
-            self.reverse_rotation, q)
-
-        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), x_dir)
-
-        start = link_pos[:, self.aiming_start_link]
-        end = start + aiming_dir
-
-        start = start.cpu().numpy()
-        end = end.cpu().numpy()
-        not_near = torch.nonzero(not_near).view(-1).cpu().numpy()
-        n_lines = 10
-        lines = np.stack([
-            np.stack((start[:,0], start[:,1], start[:,2]+0.005*i, end[:, 0], end[:, 1], end[:,2]+0.005*i), -1)
-        for i in range(-n_lines//2, n_lines//2)], -2)
-        for i, l in zip(not_near, lines):
-            e = self.envs[i]
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 1., 0.] for _ in range(n_lines)])
-            
-    def reset_goal(self, env_ids):
-        super().reset_goal(env_ids, self.goal_tensor[:, :3])
-        self.reset_aiming_goal(env_ids)
-    
-    def reset_aiming_goal(self, env_ids):
-        n_envs = len(env_ids)
-        elev = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(-np.pi/6)
-        azim = torch.rand(n_envs, dtype=torch.float32, device=self.device).mul_(np.pi/4)
-        if self.viewer is not None: azim.add_(0.3)
-
-        elev /= 2
-        azim /= 2
-        cp = torch.cos(elev) # y
-        sp = torch.sin(elev)
-        cy = torch.cos(azim) # z
-        sy = torch.sin(azim)
-
-        w = cp*cy  # cr*cp*cy + sr*sp*sy
-        x = -sp*sy # sr*cp*cy - cr*sp*sy
-        y = sp*cy  # cr*sp*cy + sr*cp*sy
-        z = cp*sy  # cr*cp*sy - sr*sp*cy
-        
-        if n_envs == len(self.envs):
-            self.goal_tensor[:, 3] = x
-            self.goal_tensor[:, 4] = y
-            self.goal_tensor[:, 5] = z 
-            self.goal_tensor[:, 6] = w
-        else:
-            self.goal_tensor[env_ids, 3] = x
-            self.goal_tensor[env_ids, 4] = y
-            self.goal_tensor[env_ids, 5] = z
-            self.goal_tensor[env_ids, 6] = w
-
-    def reward(self):
-        target_tensor = self.goal_tensor[:, :3]
-        aiming_tensor = self.goal_tensor[:, 3:]
-        
-        target_rew = super().reward(target_tensor)
-
-        dp = target_tensor - self.root_pos
-        dp[..., self.UP_AXIS] = 0
-        dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
-        
-        target_dir = dp / dist
-        q0 = quatdiff_normalized(self.x_dir, target_dir)
-        q = torch.where(target_dir[:, :1] < -0.99999,
-            self.reverse_rotation, q0)
-
-        aiming_dir = rotatepoint(quatmultiply(q, aiming_tensor), self.x_dir)
-
-        hand_pos = self.link_pos[:, self.aiming_end_link]
-        fore_arm_pos = self.link_pos[:, self.aiming_start_link]
-
-        fore_arm_dir = hand_pos - fore_arm_pos
-        arm_len = torch.linalg.norm(fore_arm_dir, ord=2, dim=-1, keepdim=True)
-        fore_arm_dir.div_(arm_len)
-
-        target_hand_pos = fore_arm_pos + arm_len * aiming_dir
-        e = torch.linalg.norm(target_hand_pos.sub_(hand_pos), ord=2, dim=-1).div_(arm_len.squeeze_(-1))
-        aiming_rew = e.mul_(-2).exp_()
-
-        rest_rew = fore_arm_dir[..., self.UP_AXIS].div(0.8).clip_(min=0, max=1) # 2nd reward to encourage character to lift its arm when aiming action is not activated
-        
-        aiming_rew = torch.where(self.near, rest_rew, aiming_rew).unsqueeze_(-1)
-
-        r = torch.cat((target_rew, aiming_rew), -1)
-        return r
-
-    def termination_check(self):
-        return super().termination_check(self.goal_tensor[:, :3])
-
-
-@torch.jit.script
-def observe_iccgan_target_aiming(state_hist: torch.Tensor, seq_len: torch.Tensor, 
-    goal_tensor: torch.Tensor, timer: torch.Tensor,
-    sp_upper_bound: float, goal_radius: float, fps: int
-):
-    UP_AXIS = 2
-
-    target_tensor = goal_tensor[..., :3]
-    aiming_tensor = goal_tensor[..., 3:]
-
-    target_ob = observe_iccgan_target(state_hist, seq_len, target_tensor, timer, sp_upper_bound=sp_upper_bound, fps=fps)
-    
-    root_pos = state_hist[-1, :, :3]
-    root_orient = state_hist[-1, :, 3:7]
-    heading = heading_zup(root_orient)
-    up_dir = torch.zeros_like(root_pos)
-    up_dir[..., UP_AXIS] = 1
-    orient_inv = axang2quat(up_dir, -heading)
-
-    dp = target_tensor - root_pos
-    dp[..., UP_AXIS] = 0
-    dist = torch.linalg.norm(dp, ord=2, dim=-1, keepdim=True)
-    
-    x_dir = torch.zeros_like(dp)
-    x_dir[..., 0] = 1
-    target_dir = dp / dist
-    q = quatdiff_normalized(x_dir, target_dir)
-
-    # ensure 180 degree rotation is around the up axis
-    reverse = torch.zeros_like(q)
-    reverse[..., UP_AXIS] = 1
-    q = torch.where(target_dir[:, :1] < -0.99999,
-        reverse, q)
-
-    aiming_dir = quatmultiply(q, aiming_tensor)
-    aiming_dir = quatmultiply(q, aiming_tensor)
-    aiming_dir = quatmultiply(orient_inv, aiming_dir)
-    aiming_dir = rotatepoint(aiming_dir, x_dir)
-
-    near = dist.squeeze_(-1) < goal_radius
-    # aiming_dir[near] = 0 # not supported by script
-    aiming_dir[near, 0] = 0
-    aiming_dir[near, 1] = 0
-    aiming_dir[near, 2] = 0
-    
-    return torch.cat((target_ob, aiming_dir), -1)
 
 class ICCGANHumanoidEE(ICCGANHumanoid):
 
@@ -3277,7 +2899,7 @@ def observe_iccgan_vrcontrol(state_hist: torch.Tensor, seq_len: torch.Tensor,
                     # (n_links X 13 X L, 72, 18, 8) -> (780 + 72 + 18 + 8 / 832 + 72 + 18 + 8 for non-tennis/tennis)
     return torch.cat((ob, additional_ob, ubody_ob, heading_ob), -1) if goal_embedding else torch.cat((ob, ubody_ob, heading_ob), -1)
 
-class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
+class ICCGANHumanoidProjectile(ICCGANHumanoidVRControl):
     STRIKE_BODY_NAMES = ["right_hand", "right_lower_arm"]
 
     def __init__(self, *args, 
@@ -3290,7 +2912,8 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
 
     def create_envs(self, n: int):
-        self._load_target_asset()
+        # 
+        self._load_proj_asset()
         if self.control_mode == "position":
             control_mode = gymapi.DOF_MODE_POS
         elif self.control_mode == "torque":
@@ -3328,18 +2951,20 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
             dof_prop["driveMode"].fill(control_mode)
             self.gym.set_actor_dof_properties(env, humanoid_handle, dof_prop)
             
-            self._build_target(env, i)
+            self._build_proj(env, i)
 
             envs.append(env)
 
         #self.get_num_actors_per_env()
         self.num_envs = len(envs)
+
+
         return envs, humanoid_handles
     
-    def _load_target_asset(self):
-        self._target_handles = []
+    def _load_proj_asset(self):
+        self._proj_handles = []
         asset_root = "./assets"
-        asset_file = "strike_target.urdf"
+        asset_file = "cube.urdf"
 
         asset_options = gymapi.AssetOptions()
         asset_options.angular_damping = 0.01
@@ -3348,12 +2973,12 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
         asset_options.density = 10.0
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
-        self._target_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
-        print("===== loaded target asset =====")
+        self._proj_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        print("===== loaded proj asset =====")
         return
     
 
-    def _build_target(self, env_ptr, env_id):
+    def _build_proj(self, env_ptr, env_id):
         col_group = env_id
         col_filter = 0
         segmentation_id = 0
@@ -3363,8 +2988,8 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
         default_pose.p.y = 3.0
         default_pose.p.z = 0.9
         
-        target_handle = self.gym.create_actor(env_ptr, self._target_asset, default_pose, "target", col_group, col_filter, segmentation_id)
-        self._target_handles.append(target_handle)
+        proj_handle = self.gym.create_actor(env_ptr, self._proj_asset, default_pose, "proj", col_group, col_filter, segmentation_id)
+        self._proj_handles.append(proj_handle)
         return
     
 
@@ -3381,9 +3006,9 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
         body_ids = torch.tensor(body_ids, device=self.device, dtype=torch.long)
         return body_ids
     
-    def _build_target_tensors(self):
+    def _build_proj_tensors(self):
         num_actors = self.get_num_actors_per_env()
-        self._target_states = self._all_root_tensor.view(self.num_envs, num_actors, 13)[..., 1, :]      # [n_envs, 13]
+        self._proj_states = self._all_root_tensor.view(self.num_envs, num_actors, 13)[..., 1, :]      # [n_envs, 13]
         self._tar_actor_ids = torch.tensor(num_actors * np.arange(self.num_envs), device=self.device, dtype=torch.int32) + 1
         
         bodies_per_env = self._all_link_tensor.shape[0] // self.num_envs
@@ -3395,46 +3020,5 @@ class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
     def create_tensors(self):
         super().create_tensors()
         self._strike_body_ids = self._build_strike_body_ids_tensor(self.envs[0], self.actors[0], self.strike_body_names)
-        self._build_target_tensors()
+        self._build_proj_tensors()
         return 
-
-class HumanoidTennisVR(ICCGANHumanoidVR):
-    CHARACTER_MODEL = "assets/cml_humanoid_tennis.xml"
-    CONTROLLABLE_LINKS = ["torso", "head",                      # 2
-        "right_upper_arm", "right_lower_arm", "right_hand",     # 3
-        "left_upper_arm", "left_lower_arm",         # 3
-        "right_thigh", "right_shin", "right_foot",              # 3
-        "left_thigh", "left_shin", "left_foot"]                 # 3
-    DOFS =  [3, 3, 
-            3, 1, 3, 
-            3, 1, 
-            3, 1, 3, 
-            3, 1, 3]
-        #pelvis # torso
-    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
-                    6,  9,  10, 13,                 # "right_upper_arm", "right_lower_arm", "right_hand", "racket"
-                    13, 16, 17,                     # "left_upper_arm", "left_lower_arm", "left_hand"
-                    17, 20, 21,                     # "right_thigh", "right_shin", "right_foot",
-                    24, 27, 30, 31                  # "left_thigh", "left_shin", "left_foot"
-                    ] 
-    print(CONTROLLABLE_LINKS)
-                    
-class HumanoidTennisVRControl(ICCGANHumanoidVRControl):
-    CHARACTER_MODEL = "assets/cml_humanoid_tennis.xml"
-    CONTROLLABLE_LINKS = ["torso", "head",                      # 2
-        "right_upper_arm", "right_lower_arm", "right_hand",     # 3
-        "left_upper_arm", "left_lower_arm",         # 3
-        "right_thigh", "right_shin", "right_foot",              # 3
-        "left_thigh", "left_shin", "left_foot"]                 # 3
-    DOFS =  [3, 3, 
-            3, 1, 3, 
-            3, 1, 
-            3, 1, 3, 
-            3, 1, 3]
-        #pelvis # torso
-    DOF_OFFSET =  [ 0,  3,                          # "torso", "head"
-                    6,  9,  10, 13,                 # "right_upper_arm", "right_lower_arm", "right_hand", "racket"
-                    13, 16, 17,                     # "left_upper_arm", "left_lower_arm", "left_hand"
-                    17, 20, 21,                     # "right_thigh", "right_shin", "right_foot",
-                    24, 27, 30, 31                  # "left_thigh", "left_shin", "left_foot"
-                    ] 
