@@ -1,6 +1,6 @@
 import numpy as np
-# python main.py config/pickfruits_joystick.py --ckpt temp 
-env_cls = "ICCGANHumanoidStrike"
+# python main.py config/pickfruits_joystick.py --ckpt 1120_pick_MIX_embedded+16_comparison --headless --server local
+env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
     motion_file = "assets/motions/clips_walk.yaml",    # lower part
@@ -13,13 +13,15 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
-    strikeBodyNames = ["right_hand", "right_lower_arm"]
-
+    #strikeBodyNames = ["right_hand", "right_lower_arm"]
+    goal_termination = False,
+    goal_embedding = True,
+    sensor_ablation = False     
 )
 
 training_params = dict(
-    max_epochs = 30000,
-    save_interval = 300,
+    max_epochs = 40000,
+    save_interval = 5000,
     terminate_reward = -1
 )
 
@@ -49,8 +51,10 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        # motion_file = "assets/retargeted/test/1016_test/cml@1016pickfruits3.npy",
-        motion_file = "assets/retargeted/test/cml@1023_picking_fruits_motion.npy",
+        #motion_file = "assets/retargeted/cml@PickFruit_1.npy",
+        # motion_file = "assets/retargeted/test/cml@1023_picking_fruits_motion.npy",
+        # motion_file = "assets/retargeted/1116_pickup/cml@Picking Up Object_mirrored.npy",
+        motion_file = "assets/retargeted/1116_pickup/1116_pickup_MIX.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
