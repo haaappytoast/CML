@@ -126,7 +126,7 @@ def test(env, model):
     #### for evaluation
     if EVAL:
         ep = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
-        np_reward = np.empty([ep, 4])
+        np_reward = np.empty([ep, 3]) if env.sensor_ablation else np.empty([ep, 4]) 
         curr_ep = 0
         count = 0
         dir_name = settings.ckpt.split("/")[0] + "/eval"

@@ -408,6 +408,7 @@ class ICCGANHumanoid(Env):
     GOAL_TENSOR_DIM = None
 
     OB_HORIZON = 4
+    GOAL_EMBEDDING = False
 
     def __init__(self, *args,
         motion_file: str,
@@ -420,6 +421,7 @@ class ICCGANHumanoid(Env):
         self.enable_goal_timer = parse_kwarg(kwargs, "enable_goal_timer", self.ENABLE_GOAL_TIMER)
         self.goal_tensor_dim = parse_kwarg(kwargs, "goal_tensor_dim", self.GOAL_TENSOR_DIM)
         self.ob_horizon = parse_kwarg(kwargs, "ob_horizon", self.OB_HORIZON)
+        self.goal_embedding = parse_kwarg(kwargs, "goal_embedding", self.GOAL_EMBEDDING)
         super().__init__(*args, **kwargs)
 
         n_envs = len(self.envs)
