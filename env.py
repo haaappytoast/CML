@@ -2207,9 +2207,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             # ego_target_rcontrol_pos = global_to_ego(ee_pos[:, 0, :], ee_rot[:, 0], target_rcontrol_gpos, 2)
             ego_target_rcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_rcontrol_gpos, 2)
             e = torch.linalg.norm(ego_target_rcontrol_pos.sub(ego_rcontrol_pos), ord=2, dim=-1)
+            
+            self.control_errors[..., 0] = e
+            
             rcontrol_rew = (e.div_(rarm_len)).mul_(-2).exp_()
 
-            self.control_errors[..., 0] = e
         #! 1. end
 
         #! 2. lcontrol reward
@@ -2225,9 +2227,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ego_target_lcontrol_pos = global_to_ego(target_root_pos, taret_root_rot, target_lcontrol_gpos, 2)
 
             l_e = torch.linalg.norm(ego_target_lcontrol_pos.sub(ego_lcontrol_pos), ord=2, dim=-1)
+            
+            self.control_errors[..., 1] = l_e
+
             lcontrol_rew = l_e.div_(larm_len).mul_(-2).exp_()
 
-            self.control_errors[..., 1] = l_e
         #! 2. end
 
         root_pos, root_orient = self.root_pos, self.root_orient
@@ -2254,9 +2258,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ego_target_hmd_pos = global_to_ego(target_root_pos, taret_root_rot, target_hmd_gpos, 2)
 
             hmd_e = torch.linalg.norm(ego_target_hmd_pos.sub(ego_hmd_pos), ord=2, dim=-1)
+            
+            self.control_errors[..., 2] = hmd_e
+            
             hmd_pos_e_rew = hmd_e.mul_(-3).exp_()
 
-            self.control_errors[..., 2] = hmd_e
         #! 3. end
 
         #! 4. hmd ORIENTATION reward
@@ -2269,9 +2275,11 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             ego_diffrot = quat_mul(heading_orient_inv, diff_grot)
 
             hmd_rot_e = torch.linalg.norm(ego_diffrot, ord=2, dim=-1)
-            hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
             
             self.control_errors[..., 3] = hmd_rot_e
+            
+            hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
+            
         #! 4. end
         # save array of tracking error of headset and controllers
  
