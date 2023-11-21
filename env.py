@@ -9,7 +9,6 @@ from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView, HumanoidViewTennis
 from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
-from env_proj import ICCGANHumanoidProjectile
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
     return kwargs[key] if key in kwargs else default_val
@@ -223,7 +222,17 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "FullBody")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "Default")
 
+        # for interaction with objects
+        self.subscribe_keyboards_for_obj()
     
+    # for interaction with objects
+    def subscribe_keyboards_for_obj(self):
+        pass
+    def update_obj_actions(self, event):
+        pass
+    def update_vobjects(self):
+        pass
+
     def update_viewer(self):
         self.gym.poll_viewer_events(self.viewer)
         for event in self.gym.query_viewer_action_events(self.viewer):
@@ -244,6 +253,9 @@ class Env(object):
                 self.upper, self.lower, self.full = False, False, True
             if event.action == "Default" and event.value > 0:
                 self.upper, self.lower, self.full = False, False, False
+
+            # for interaction with virtual objects
+            self.update_obj_actions(event)
 
         if self.camera_following: self.update_camera()
         self.gym.step_graphics(self.sim)
@@ -368,6 +380,10 @@ class Env(object):
         if not self.viewer_pause or self.viewer_advance:
             self.apply_actions(actions)
             self.do_simulation()
+
+            # for interaction with virtual objects 
+            self.update_vobjects()
+
             self.refresh_tensors()
             self.lifetime += 1
             if self.viewer is not None:

@@ -3,6 +3,8 @@ import importlib
 from collections import namedtuple
 
 import env
+import env_proj
+
 from models import ACModel, Discriminator, ACModel_gembed
 
 import torch
@@ -560,7 +562,13 @@ if __name__ == "__main__":
     else:
         discriminators = {"_/full": env.DiscriminatorConfig()}
     if hasattr(config, "env_cls"):
-        env_cls = getattr(env, config.env_cls)
+        
+        if "proj" in config.env_cls.lower():
+            env_cls = getattr(env_proj, config.env_cls)
+            print(env_cls)
+        
+        else:
+            env_cls = getattr(env, config.env_cls)
     else:
         env_cls = env.ICCGANHumanoid
     print(env_cls, config.env_params)
