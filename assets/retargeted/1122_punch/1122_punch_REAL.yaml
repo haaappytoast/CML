@@ -1,0 +1,18 @@
+motions:
+#! idelblock
+- file: cml@idleblock (1).npy
+  weight: null
+- file: cml@idleblock (2).npy
+  weight: null
+- file: cml@idleblock (3).npy
+  weight: null
+- file: cml@idleblock (4).npy
+  weight: null
+
+#! REAL
+- file: cml@user_punch (1).npy
+  weight: null
+- file: cml@user_punch (2).npy
+  weight: null
+- file: cml@user_punch (3).npy
+  weight: null

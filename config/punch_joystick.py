@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/punch_joystick.py --ckpt 1024_punch_MIX+REAL --headless --server local
+# python main.py config/punch_joystick.py --ckpt 1122_punch_REAL+MIX --headless --server local
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 300,
@@ -47,8 +47,7 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        # motion_file = "assets/retargeted/1024_punch_REAL/cml@TESTpunch9.npy",
-        motion_file = "assets/retargeted/1024_punch_MIX+REAL.yaml",
+        motion_file = "assets/retargeted/1122_punch/1122_punch_MIX+REAL.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
@@ -61,8 +60,3 @@ discriminators = {
         weight=0.15
     )
 }
-
-# cml@StandingBlockIdle.npy OK --> 너무 잘 학습해버림!
-# cml@Blocking1_mirrored.npy OK
-# cml@Blocking1.npy NOT OK
-# cml@BodyBlock.npy
