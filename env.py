@@ -4,7 +4,9 @@ import os
 from isaacgym import gymapi, gymtorch
 import torch
 import utils
-from utils import heading_zup, axang2quat, rotatepoint, quatconj, quatmultiply, quatdiff_normalized, quat_inverse, calc_heading_quat
+from utils import heading_zup, axang2quat, rotatepoint, quatconj, quat2axang, \
+                    quatmultiply, quatdiff_normalized, quat_inverse, calc_heading_quat
+import math
 from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView, HumanoidViewTennis
@@ -217,10 +219,10 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "TOGGLE_PAUSE")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_D, "SINGLE_STEP_ADVANCE")
 
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_0, "UpperBody")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "LowerBody")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "FullBody")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "Default")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_0, "FullBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_9, "UpperBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_8, "LowerBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_7, "Default")
 
         # for interaction with objects
         self.subscribe_keyboards_for_obj()
@@ -2249,7 +2251,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             lcontrol_rew = l_e.div_(larm_len).mul_(-2).exp_()
 
         #! 2. end
-
+        # current heading
         root_pos, root_orient = self.root_pos, self.root_orient
         UP_AXIS = 2
         origin = root_pos.clone()
@@ -2259,7 +2261,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         up_dir[..., UP_AXIS] = 1
         heading_orient_inv = axang2quat(up_dir, -heading)                       # N x 4
-
+        
+        # target heading
+        tar_heading = heading_zup(taret_root_rot)
+        tar_up_dir = torch.zeros_like(origin)                                                  # N x 1 x 3
+        tar_up_dir[..., UP_AXIS] = 1
+        target_heading_orient_inv = axang2quat(tar_up_dir, -tar_heading)                       # N x 4
+    
         #! 3. hmd POSITION reward
         if (self.hpos_coeff != 0):
             start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1])) * 3
@@ -2284,18 +2292,24 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! 4. hmd ORIENTATION reward
         if (self.hrot_coeff != 0):
             start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3
+            # current hmd rot global2local
+            head_rot = self.link_orient[:, self.head]                           # global
+            head_lrot = quat_mul(heading_orient_inv, head_rot)                  # [N, 4]
 
-            target_hmd_grot = goal_tensor[..., start_idx + 0 : start_idx + 4]
-            head_rot = self.link_orient[:, self.head]
-            diff_grot= quat_mul(quat_inverse(head_rot), target_hmd_grot)
-            ego_diffrot = quat_mul(heading_orient_inv, diff_grot)
+            
+            # target hmd rot
+            tar_hmd_grot = goal_tensor[..., start_idx + 0 : start_idx + 4]      # global
+            tar_hmd_lrot = quat_mul(target_heading_orient_inv, tar_hmd_grot)    # [N, 4]
 
-            hmd_rot_e = torch.linalg.norm(ego_diffrot, ord=2, dim=-1)
+            diff_lrot= quat_mul(quat_inverse(head_lrot), tar_hmd_lrot)
+            _, ang = quat2axang(diff_lrot)
+            hmd_rot_e = ang * (180.0 / math.pi)
+            #ego_diffrot = quat_mul(heading_orient_inv, diff_grot)
+            #hmd_rot_e = torch.linalg.norm(diff_lrot, ord=2, dim=-1)
+            #hmd_rot_e = ang
+            self.control_errors[..., 3] = abs(hmd_rot_e)
             
-            self.control_errors[..., 3] = hmd_rot_e
-            
-            hmd_rot_e_rew = hmd_rot_e.mul_(-2).exp_()
-            
+            hmd_rot_e_rew = abs(ang).mul_(-2).exp_()
         #! 4. end
         # save array of tracking error of headset and controllers
  
