@@ -1,8 +1,8 @@
 import numpy as np
-# python main.py config/blocking_joystick.py --ckpt 1114_block_MIX+REAL_embed16 --headless --server local
+# python main.py config/blocking_joystick.py --ckpt 1116_block_REAL_embedded+16_comparison --headless --server local
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
-    episode_length = 300,
+    episode_length = 450,
     motion_file = "assets/motions/clips_walk.yaml",    # lower part
 
     sp_lower_bound = 0.9,
@@ -14,11 +14,13 @@ env_params = dict(
     goal_sp_max = 1.25,
     enableRandomHeading=True,
     goal_termination = False,
-    goal_embedding = True
+    goal_embedding = True,
+    sensor_ablation = False 
+    
 )
 
 training_params = dict(
-    max_epochs = 60000,
+    max_epochs = 40000,
     save_interval = 5000,
     terminate_reward = -1
 )
@@ -49,8 +51,9 @@ discriminators = {
     "usermotion1/upper": dict(
         # motion_file = "assets/retargeted/test/blocking_test/cml@outward_block+blocking2.npy",
         # motion_file = "assets/retargeted/test/blocking_test/cml@blocking2.npy",
-        motion_file = "assets/retargeted/1114_block_MIX+REAL.yaml",
+        # motion_file = "assets/retargeted/1114_block_REAL.yaml",
         # motion_file = "assets/retargeted/1114_userblock/cml@user_outblock_TEST.npy",
+        motion_file = "assets/retargeted/1114_userblock/cml@user_inoutblock_TEST2.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,

@@ -556,7 +556,8 @@ class ICCGANHumanoid(Env):
         elif self.rew_dim:
             goal_reward_weight = []
             assert(self.rew_dim == len(goal_reward_weight))
-
+        
+        print("goal_reward_weight: ", goal_reward_weight)
         n_comp = len(discriminators) + self.rew_dim
         if n_comp > 1:
             self.reward_weights = torch.zeros((n_envs, n_comp), dtype=torch.float32, device=self.device)

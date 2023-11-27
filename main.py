@@ -3,7 +3,7 @@ import importlib
 from collections import namedtuple
 
 import env
-import env_proj
+import env_proj, env_reach, env_punch
 
 from models import ACModel, Discriminator, ACModel_gembed
 
@@ -566,7 +566,13 @@ if __name__ == "__main__":
         if "proj" in config.env_cls.lower():
             env_cls = getattr(env_proj, config.env_cls)
             print(env_cls)
-        
+                
+        elif "reach" in config.env_cls.lower():
+            env_cls = getattr(env_reach, config.env_cls)
+            print(env_cls)
+        elif "strike" in config.env_cls.lower():
+            env_cls = getattr(env_punch, config.env_cls)
+            print(env_cls)
         else:
             env_cls = getattr(env, config.env_cls)
     else:
@@ -587,10 +593,10 @@ if __name__ == "__main__":
             pass
         else:
             if EVAL:
-
                 env.episode_length = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
             else:
-                env.episode_length = 300
+                env.episode_length = config.env_params['episode_length']
+
 
     value_dim = len(env.discriminators)+env.rew_dim         # critic 개수
     if env.goal_embedding:

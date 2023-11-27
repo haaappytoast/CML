@@ -48,7 +48,9 @@ class SensorInputConfig(object):
 SensorInputProperty = namedtuple("SensorInputProperty",
     "name rlh_localPos rlh_localRot joystick")
 
-class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
+class ICCGANHumanoidStrike(ICCGANHumanoidVRControl):
+    STRIKE_BODY_NAMES = ["right_hand", "right_lower_arm"]
+
     def __init__(self, *args, 
                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
@@ -58,22 +60,22 @@ class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
         self._tar_dist_max = 0.5
         self._tar_height_min = 1.0
         self._tar_height_max = 1.5
+        self.time = 0
         self.reach = False
-        self.shoot = "none"
+        self.resett = False
+
+        self.strike_body_names = parse_kwarg(kwargs, "strike_body_names", self.STRIKE_BODY_NAMES)
 
         super().__init__(*args, sensor_inputs = self.sensor_inputs, **kwargs)
         
         self._tar_pos = -100 * torch.ones([self.num_envs, 3], device=self.device, dtype=torch.float)
         
         reach_body = ["right_hand", "left_hand"]
-        dir_body = ["right_lower_arm", "left_lower_arm"]
 
         self._reach_body_idx = []
-        self.dir_body_idx = []
         
         for i in range(len(reach_body)): 
             self._reach_body_idx.append(self._build_reach_body_id_tensor(self.envs[0], self.actors[0], reach_body[i]))
-            self.dir_body_idx.append(self._build_reach_body_id_tensor(self.envs[0], self.actors[0], dir_body[i]))
 
     def create_envs(self, n: int):
         #! location_marker assets 
@@ -133,38 +135,40 @@ class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
         return 
         
     def _load_obj_asset(self):
+        self._target_handles = []
         asset_root = "./assets"
-        asset_file = "location_marker.urdf"
+        asset_file = "strike_target.urdf"
 
         asset_options = gymapi.AssetOptions()
         asset_options.angular_damping = 0.01
         asset_options.linear_damping = 0.01
         asset_options.max_angular_velocity = 100.0
-        asset_options.density = 1.0
-        asset_options.fix_base_link = True
+        asset_options.density = 10.0
         asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
-        self._marker_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        self._target_asset = self.gym.load_asset(self.sim, asset_root, asset_file, asset_options)
+        print("===== loaded target asset =====")
         return
     
     def _build_obj(self, env_ptr, env_id):
         col_group = env_id
-        col_filter = 2
+        col_filter = 0
         segmentation_id = 0
 
         default_pose = gymapi.Transform()
+        default_pose.p.x = -0.3
+        default_pose.p.y = 3.2
+        default_pose.p.z = 0.9
         
-        marker_handle = self.gym.create_actor(env_ptr, self._marker_asset, default_pose, "marker", col_group, col_filter, segmentation_id)
-        self.gym.set_rigid_body_color(env_ptr, marker_handle, 0, gymapi.MESH_VISUAL, gymapi.Vec3(0.8, 0.0, 0.0))
-        self._marker_handles.append(marker_handle)
-
+        target_handle = self.gym.create_actor(env_ptr, self._target_asset, default_pose, "target", col_group, col_filter, segmentation_id)
+        self._target_handles.append(target_handle)
         return
 
     def _build_obj_state_tensors(self):
         num_actors = self.get_num_actors_per_env()  # n_humanoid + 1 
         self._marker_states = self._all_root_tensor.view(self.num_envs, num_actors, self._all_root_tensor.shape[-1])[..., num_actors-1:, :]
         self._marker_pos = self._marker_states[..., :3]
-        
+
         self._marker_actor_ids = self._humanoid_actor_ids + 1
 
         # marker contact force
@@ -179,75 +183,67 @@ class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
     
     def _update_obj(self):
         if self.reach:
-            #tar_body_idx = self._reach_body_idx[0] if self.shoot=="right" else self._reach_body_idx[1]
-            #dir_idx = self.dir_body_idx[0] if self.shoot == "right" else self.dir_body_idx[1]
             self._update_task()
+            self._update_target()
+            self.reach = False
+        if self.resett:
+            self._tar_pos[..., 0:3] = torch.tensor([-100, -100, -100])
+            self._update_target()
+            self.resett = False
         return    
-    
-    def map_z(self, action):
-        if action == "ru_object":   # KEY_1
-            return [0.46, -0.38, 0.85]
-        if action == "rm_object":   # KEY_2
-            return [0.54, -0.49, 0.45]
-        if action == "rd_object":   # KEY_3
-            return [0.52, -0.47, 0.14]
-        
-        if action == "lu_object":   # KEY_Q
-            return [0.37, 0.44, 0.92]
-        if action == "lm_object":   # KEY_W
-            return [0.59, 0.44, 0.5]        
-        if action == "ld_object":   # KEY_E
-            return [0.43, 0.42 ,0.1]        
+
+    def map_xyoffset(self):
+        if self.time == 0:
+            xoffset, yoffset = -0.2, 3
+        if self.time == 1:
+            xoffset, yoffset = -0.75, 3.55
         else:
-            return [-100, -100, -100]
+            xoffset, yoffset = 0.4, 6.0
 
-
+        return xoffset, yoffset
     def _update_task(self):
         env_ids = self.envs
         n = len(env_ids)
-
         heading = heading_zup(self.root_orient[0])
         UP_AXIS = 2
         up_dir = torch.zeros_like(self.root_pos[0])                                       # N x 1 x 3
         up_dir[..., UP_AXIS] = 1
         heading_orient = axang2quat(up_dir, heading) 
-        xoffset, yoffset = self.map_z(self.shoot)[0], self.map_z(self.shoot)[1]
+        
+        xoffset, yoffset = self.map_xyoffset()
 
         offset_vec = torch.tensor([xoffset, yoffset, 0], dtype=torch.float32, device=self.device)
         ego_offset_vec = rotatepoint(heading_orient, offset_vec)        
-        pos_z = self.root_pos[..., 2] + self.map_z(self.shoot)[2]
 
-            
-        self._tar_pos[..., 0:2] = self.root_pos[..., 0:2] + ego_offset_vec[..., 0:2]
-        self._tar_pos[..., 2] = pos_z
-        
-        if self.shoot == "reset":
-            self._tar_pos[..., 0:3] = -100 * torch.ones_like(self._tar_pos[..., 0:3])
-
+        print(" tar_pos changed!")
+        self._tar_pos[..., 0:3] = self.root_pos + offset_vec
+        self._tar_pos[..., 2] = 0.95
         return
 
-    def _update_marker(self):
+    def _update_target(self):
         self._marker_pos[..., :] = self._tar_pos
+        self._marker_states[..., 3:6] = 0.0                 # quaternion
+        self._marker_states[..., 6] = 1.0                   # quaternion
+        self._marker_states[..., 7:13] = 0.0                # lin_vel, ang_vel
         self.gym.set_actor_root_state_tensor_indexed(self.sim, gymtorch.unwrap_tensor(self._all_root_tensor),
                                                     gymtorch.unwrap_tensor(self._marker_actor_ids), len(self._marker_actor_ids))
         
         return
 
     def _draw_task(self):
-        if self.shoot != "none":
-            self._update_marker()
-            cols = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
-            self.gym.clear_lines(self.viewer)
-            reach_idx = self._reach_body_idx[0] if self.shoot=="right" else self._reach_body_idx[1]
-            starts = self.link_pos[:, reach_idx, :]
-            ends = self._tar_pos
+            
+        cols = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+        self.gym.clear_lines(self.viewer)
+        reach_idx = self._reach_body_idx[0]
+        starts = self.link_pos[:, reach_idx, :]
+        ends = self._tar_pos
 
-            verts = torch.cat([starts, ends], dim=-1).cpu().numpy()
+        verts = torch.cat([starts, ends], dim=-1).cpu().numpy()
 
-            for i, env_ptr in enumerate(self.envs):
-                curr_verts = verts[i]
-                curr_verts = curr_verts.reshape([1, 6])
-                self.gym.add_lines(self.viewer, env_ptr, curr_verts.shape[0], curr_verts, cols)
+        for i, env_ptr in enumerate(self.envs):
+            curr_verts = verts[i]
+            curr_verts = curr_verts.reshape([1, 6])
+            self.gym.add_lines(self.viewer, env_ptr, curr_verts.shape[0], curr_verts, cols)
 
         return
     
@@ -257,27 +253,22 @@ class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
 
     def subscribe_keyboards_for_obj(self):
         # place object near hands
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "ru_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_5, "rm_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "rd_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_4, "lu_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "lm_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_6, "ld_object")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_SPACE, "reset")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "place_target")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "reset")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "temp")
         return
     
     def update_obj_actions(self, event):
         # projectile
-        if (event.action == "ru_object" or event.action == "rm_object" or event.action == "rd_object") and event.value > 0:
+        if (event.action == "place_target") and event.value > 0:
             self.reach = True
-            self.shoot = event.action     
-        if (event.action == "lu_object" or event.action == "lm_object" or event.action == "ld_object") and event.value > 0:
-            self.reach = True
-            self.shoot = event.action
-        if event.action == "reset" and event.value > 0:
-            self.reach = True
-            self.shoot = event.action
-        print(event.action, ": ", self.lifetime)
+            self.time+=1
+            print("place target!")
+        if (event.action == "reset") and event.value > 0:
+            self.resett = True
+            print("reset!")
+        if (event.action == "temp") and event.value > 0:
+            print("self.root_pos: ", self.root_pos)
         return
 
     def update_viewer(self):

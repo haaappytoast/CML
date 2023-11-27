@@ -161,10 +161,7 @@ class ICCGANHumanoidProjectile(ICCGANHumanoidVRControl):
             default_pose.p.x = 200 + i
             default_pose.p.z = 1
             obj_type = obj[0]
-            if (obj_type == "small"):
-                proj_asset = self._small_proj_asset
-            elif (obj_type == "large"):
-                proj_asset = self._large_proj_asset
+            proj_asset = self._small_proj_asset
 
             proj_handle = self.gym.create_actor(env_ptr, proj_asset, default_pose, "proj{:d}".format(i), col_group, col_filter, segmentation_id)
             self._proj_handles.append(proj_handle)
