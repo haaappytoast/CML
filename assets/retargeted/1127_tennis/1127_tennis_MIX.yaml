@@ -1,0 +1,17 @@
+motions:
+##### red motion #####
+# - file: 1103_tennis/cml@3-IDLE.npy
+#   weight: null
+- file: cml@10-Hit 1 Speed2.npy
+  weight: null
+- file: cml@10-Hit 2 Speed2.npy
+  weight: null
+- file: cml@10-Hit 3 Speed2.npy
+  weight: null  
+# - file: cml@14-Runrighthit.npy
+#   weight: null  
+- file: cml@20-Reaction1.npy
+  weight: null  
+- file: cml@20-Reaction2.npy
+  weight: null  
+

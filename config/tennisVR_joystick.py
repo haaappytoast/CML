@@ -1,10 +1,11 @@
 import numpy as np
-# python main.py config/tennisVR_joystick.py --ckpt 1108_tennisVRControl --server local --headless 
+# python main.py config/tennisVR_joystick.py --ckpt 1128_tennis_REAL+MIX0302 --server local --headless 
 env_cls = "HumanoidTennisVRControl"
 env_params = dict(
     episode_length = 300,
-    motion_file = "assets/retargeted/1106_tennis_walk.yaml",    # lower part
+    motion_file = "assets/retargeted/1127_tennis/1106_tennis_walk.yaml",    # lower part
     sp_lower_bound = 0.9,
+    goal_reward_weight = (0.3, 0.2),
     sp_upper_bound = 1.2,
     goal_timer_range = (90, 150),
     goal_sp_mean = 1.,
@@ -12,7 +13,8 @@ env_params = dict(
     goal_sp_min = 0,
     goal_sp_max = 1.25,
     enableRandomHeading=True,
-    goal_termination = False
+    goal_termination = False,
+    sensor_ablation = False     
 )
 
 training_params = dict(
@@ -45,9 +47,8 @@ sensor_input = {
 
 discriminators = {
     "usermotion1/upper": dict(
-        # motion_file = "assets/retargeted/1103_tennis.yaml",
         # motion_file = "assets/retargeted/1103_tennis/cml@10-Hit 3 Speed2.npy",
-        motion_file = "assets/retargeted/1103_tennis/TEST/cml@tennis0_test.npy",
+        motion_file = "assets/retargeted/1127_tennis/1127_tennis_MIX+REAL.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "racket", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,
