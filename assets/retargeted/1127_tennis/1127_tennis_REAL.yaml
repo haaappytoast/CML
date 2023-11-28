@@ -1,8 +1,14 @@
 motions:
 ##### user motions #####
-- file: cml@user_tennis (2).npy
+# - file: cml@user_tennis (2).npy
+#   weight: null
+# - file: cml@user_tennis (3).npy
+#   weight: null
+# - file: cml@user_tennis (4).npy
+#   weight: null
+- file: cml@tennis_1127_TRAIN0.npy
   weight: null
-- file: cml@user_tennis (3).npy
+- file: cml@tennis_1127_TRAIN1.npy
   weight: null
-- file: cml@user_tennis (4).npy
+- file: cml@tennis_1127_TRAIN2.npy
   weight: null
