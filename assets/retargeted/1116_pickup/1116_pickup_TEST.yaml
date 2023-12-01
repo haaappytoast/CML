@@ -1,0 +1,8 @@
+motions:
+   #! TEST pick objects
+- file: cml@user_pick_TEST0.npy
+  weight: null
+- file: cml@user_pick_TEST1.npy
+  weight: null
+- file: cml@user_pick_TEST2.npy
+  weight: null

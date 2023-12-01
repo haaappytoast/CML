@@ -1,0 +1,6 @@
+motions:
+########## TEST ############
+- file: ../1114_userblock/cml@user_outblock_TEST.npy
+  weight: null
+- file: ../1114_userblock/cml@user_inoutblock_TEST2.npy
+  weight: null

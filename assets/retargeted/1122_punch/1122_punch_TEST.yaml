@@ -1,0 +1,18 @@
+motions:
+#! idelblock
+- file: cml@user_punchTEST0.npy
+  weight: null
+- file: cml@user_punchTEST1.npy
+  weight: null  
+- file: cml@user_punchTEST3.npy
+  weight: null
+- file: cml@user_punchTEST4.npy
+  weight: null
+- file: cml@user_punchTEST5.npy
+  weight: null
+- file: cml@user_punchTEST6.npy
+  weight: null
+- file: cml@user_punchTEST7.npy
+  weight: null
+- file: cml@user_punchTEST8.npy
+  weight: null

@@ -1,0 +1,81 @@
+motions:
+##### user motion #####
+#! idle block
+- file: ../1114_userblock/cml@user_idleblock0.npy
+  weight: null
+- file: ../1114_userblock/cml@user_idleblock1.npy
+  weight: null
+#! inblock
+- file: ../1114_userblock/cml@user_inblock2.npy
+  weight: null
+- file: ../1114_userblock/cml@user_inblock2_reverse.npy
+  weight: null
+#! outblock
+- file: ../1114_userblock/cml@user_outblock3.npy
+  weight: null
+- file: ../1114_userblock/cml@user_outblock3_reverse.npy
+  weight: null
+
+##### mixamo motion #####
+#! outblock
+- file: cml@outblock (1).npy
+  weight: null
+- file: cml@outblock (1)_reverse.npy
+  weight: null
+- file: cml@outblock (2).npy
+  weight: null
+- file: cml@outblock (2)_reverse.npy
+  weight: null
+- file: cml@outblock (3).npy
+  weight: null
+- file: cml@outblock (3)_reverse.npy
+  weight: null
+- file: cml@outblock (4).npy
+  weight: null
+- file: cml@outblock (4)_reverse.npy
+  weight: null
+- file: cml@outblock (5).npy
+  weight: null
+- file: cml@outblock (6).npy
+  weight: null
+- file: cml@outblock (6)_reverse.npy
+  weight: null
+- file: cml@outblock (7).npy
+  weight: null
+- file: cml@outblock (7)_reverse.npy
+  weight: null
+#! idelblock
+- file: cml@idleblock (1).npy
+  weight: null
+- file: cml@idleblock (2).npy
+  weight: null
+- file: cml@idleblock (3).npy
+  weight: null
+- file: cml@idleblock (4).npy
+  weight: null
+
+#! inwardblock
+- file: cml@inwardblock (0).npy
+  weight: null
+- file: cml@inwardblock (0)_reverse.npy
+  weight: null
+- file: cml@inwardblock (2).npy
+  weight: null
+- file: cml@inwardblock (2)_reverse.npy
+  weight: null
+- file: cml@inwardblock (0).npy
+  weight: null
+- file: cml@inwardblock (0)_reverse.npy
+  weight: null
+- file: cml@inwardblock (2).npy
+  weight: null
+- file: cml@inwardblock (2)_reverse.npy
+  weight: null
+- file: cml@inwardblock (4).npy
+  weight: null
+- file: cml@inwardblock (4)_reverse.npy
+  weight: null
+- file: cml@inwardblock (6).npy
+  weight: null
+- file: cml@inwardblock (6)_reverse.npy
+  weight: null
