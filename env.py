@@ -224,6 +224,12 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_8, "LowerBody")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_7, "Default")
 
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_S, "x_dir")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_Z, "y_dir")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_X, "-x_dir")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_C, "-y_dir")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "reset")
+
         # for interaction with objects
         self.subscribe_keyboards_for_obj()
     
@@ -256,6 +262,21 @@ class Env(object):
             if event.action == "Default" and event.value > 0:
                 self.upper, self.lower, self.full = False, False, False
 
+            if event.action == "x_dir" and event.value > 0:
+                self.x, self.y, self.mx, self.my, self.resett = True, False, False, False, False
+                print("\n\nx_dir!!\n\n")
+            if event.action == "y_dir" and event.value > 0:
+                self.x, self.y, self.mx, self.my, self.resett = False, True, False, False, False
+                print("\n\ny_dir!!\n\n")
+            if event.action == "-x_dir" and event.value > 0:
+                self.x, self.y, self.mx, self.my, self.resett = False, False, True, False, False
+                print("\n\n-x_dir!!\n\n")
+            if event.action == "-y_dir" and event.value > 0:
+                self.x, self.y, self.mx, self.my, self.resett = False, False, False, True, False
+                print("\n\n-y_dir!!\n\n")
+            if event.action == "reset" and event.value > 0:
+                self.x, self.y, self.mx, self.my, self.resett = False, False, False, False, True
+                print("\n\nRESET!!\n\n")
             # for interaction with virtual objects
             self.update_obj_actions(event)
 
@@ -381,10 +402,12 @@ class Env(object):
     def step(self, actions):
         if not self.viewer_pause or self.viewer_advance:
             self.apply_actions(actions)
-            self.do_simulation()
-
+            
             # for interaction with virtual objects 
             self.update_vobjects()
+            
+            self.do_simulation()
+
 
             self.refresh_tensors()
             self.lifetime += 1
@@ -1741,7 +1764,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
         self.sensor_inputs = sensor_inputs
         self.upper, self.lower, self.full = False, False, False
-
+        self.x, self.y, self.mx, self.my, self.resett = False, False, False, False, True
         # Sensor data config
         for name, sensorconfig in self.sensor_inputs.items():
             print("\n=======\n", name, ": sensor input path well detected", "\n=======\n")
@@ -1752,6 +1775,8 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
                 self.curr_ep = 0
                 self.count = 0
                 self.tracking_errors = np.empty([self.ep, 3])   # headset_error [cm], headset_error [deg], controller_error [cm]
+                self.direction_errors = np.empty((self.ep,))   # diff_angle
+                self.diff_angle = 0
                 self.ckpt = ckpt
             else:
                 self.inference = False
@@ -1958,7 +1983,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         # self.visualize_ee_positions()
-        self.visualize_goal_positions_wrt_curr()
+        #self.visualize_goal_positions_wrt_curr()
         
         # self.visualize_goal_positions()
         # self.visualize_control_positions(isRef=True)
@@ -2320,15 +2345,20 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         return total_r.unsqueeze_(-1)
     
     def track_errors(self):
-        if self.curr_ep < self.ep:
+        if self.curr_ep < self.episode_length:
             # 1. rlcontroller [cm], headset [cm], headset [deg] 
             errors = torch.hstack([self.control_errors[..., 0:2].mean(), self.control_errors[..., 2:].mean(dim=0)])
             self.tracking_errors[self.curr_ep] = np.array(errors.cpu().numpy())
+            self.direction_errors[self.curr_ep] = self.diff_angle
             self.curr_ep+=1
         
-        if self.curr_ep == self.ep or len((self.info["terminate"] == True).nonzero()):
-            print("\n================" + str(self.curr_ep) + ": save tracking error: ", str(self.count), "================")
+        if self.curr_ep == self.episode_length or len((self.info["terminate"] == True).nonzero()):
+            print("\n================" + str(self.curr_ep) + ": save tracking/direction error: ", str(self.count), "================")
             np.save(self.ckpt.split("/")[0]+ "/eval/trial" + str(self.count) + "_tracking_errors", self.tracking_errors[..., :self.curr_ep])
+            np.save(self.ckpt.split("/")[0]+ "/eval/trial" + str(self.count) + "_dir_err", self.direction_errors[..., :self.curr_ep])
+            # reset self.tracking_errors / self.direction_errors
+            self.tracking_errors = np.empty([self.episode_length, 3])   # headset_error [cm], headset_error [deg], controller_error [cm]
+            self.direction_errors = np.empty((self.episode_length,))   # diff_angle            self.curr_ep = 0
             self.curr_ep = 0
             self.count +=1
             
@@ -2724,13 +2754,23 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         # test time
         if (self.inference):
             joystick = self.joystick[self.lifetime[env_ids] % self.joystick.size(0), :] 
-            global_theta = torch.atan2(joystick[..., 1], joystick[..., 0])       # [1]
+            global_theta = torch.atan2(joystick[..., 0], joystick[..., 1])       # [1]
+            
+            if self.x: global_theta = torch.ones_like(global_theta) * 0
+            elif self.y: global_theta = torch.ones_like(global_theta) * (1.5708) 
+            elif self.my: global_theta = torch.ones_like(global_theta) * (-1.5708)
+            elif self.mx: global_theta = torch.ones_like(global_theta) * (3.14159)
+            elif self.resett: global_theta = torch.atan2(joystick[..., 0], joystick[..., 1])       # [1]
+
             g_tar_dir = torch.stack([torch.cos(global_theta), torch.sin(global_theta), torch.zeros((len(env_ids), ), device=self.device)], dim=-1)       # [1, 3]
 
             rand_theta = global_theta
-            tar_sp = torch.linalg.norm(g_tar_dir, ord=2, dim=-1)
+            tar_dir = torch.stack([joystick[..., 0].repeat(len(env_ids)), joystick[..., 1].repeat(len(env_ids)), torch.zeros((len(env_ids), ), device=self.device)], dim=-1)
+            face_tar_dir = tar_dir
+            tar_sp = torch.linalg.norm(tar_dir, ord=2, dim=-1) / math.sqrt(2)
             #! need to change later facing!
             rand_face_theta = global_theta
+
 
         # train time
         else:                   
@@ -2750,9 +2790,14 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             else:
                 tar_sp = torch.nn.init.trunc_normal_(torch.empty(n_envs, dtype=torch.float32, device=self.device), mean=self.goal_sp_mean, std=self.goal_sp_std, a=self.goal_sp_min, b=self.goal_sp_max)
 
+            tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
+            face_tar_dir = torch.stack([torch.cos(rand_face_theta), torch.sin(rand_face_theta)], dim=-1)
+
+        if (not self.resett):
+            tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
+            face_tar_dir = torch.stack([torch.cos(rand_face_theta), torch.sin(rand_face_theta)], dim=-1)
+
         change_steps_timer = torch.randint(self.goal_timer_range[0], self.goal_timer_range[1], (n_envs,), dtype=self.goal_timer.dtype, device=self.device)
-        tar_dir = torch.stack([torch.cos(rand_theta), torch.sin(rand_theta)], dim=-1)       # [num_envs, 2]
-        face_tar_dir = torch.stack([torch.cos(rand_face_theta), torch.sin(rand_face_theta)], dim=-1)
 
         start_idx = (int(self.rlh_coeffs[0]) + int(self.rlh_coeffs[1]) + int(self.rlh_coeffs[2])) * 3 + int(self.rlh_coeffs[3]) * 4
         root_start_idx = start_idx + int(self.root_coeffs[0]) * 3
@@ -2812,7 +2857,8 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         heading_rew = torch.zeros_like(sensor_rew)
         facing_rew = torch.zeros_like(sensor_rew)
         if self.root_coeffs[0]:
-            heading_rew = compute_heading_reward(root_pos, root_pos_prev, heading_tensor, self.fps)
+            heading_rew, diff_angle = compute_heading_reward(root_pos, root_pos_prev, heading_tensor, self.fps)
+            self.diff_angle = diff_angle
             heading_rew.unsqueeze_(-1)
 
         if self.root_coeffs[1]:
@@ -2844,7 +2890,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             zero = np.zeros_like(tar_x)+0.05
 
             lines = np.stack([
-                np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * tar_x, p[:,1] + tar_sp * tar_y, zero), -1) 
+                np.stack((p[:,0], p[:,1], zero+0.02*i, p[:,0] + 1.7 * tar_sp * tar_x, p[:,1] + 1.7 * tar_sp * tar_y, zero), -1) 
                 for i in range(n_lines)], -2)
             
             for e, l in zip(self.envs, lines):
@@ -2855,20 +2901,21 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         sim_p_ = self.state_hist[-1][:, :3]
         dt = 1.0/self.fps 
         sim_delta_p = sim_p - sim_p_
-        sim_vel = sim_delta_p / dt                                                             # [num_envs, 3]
+        sim_vel = sim_delta_p / dt    
         sim_dir = torch.cat((sim_vel[..., 0:2], torch.zeros((sim_vel.size(0), 1), device=sim_vel.device)), -1)   # x-dir
-        sim_dir = sim_dir / torch.norm(sim_dir, dim=-1, keepdim=True).repeat(1, 3)
+        #sim_dir = sim_dir / torch.norm(sim_dir, dim=-1, keepdim=True).repeat(1, 3)
         sim_x = sim_dir[..., 0].cpu().numpy()
         sim_y = sim_dir[..., 1].cpu().numpy()
 
         zero = np.zeros_like(sim_x)+0.05
+        self.sim_speed = torch.linalg.norm(sim_vel[..., 0:2], ord=2, dim=-1).cpu().numpy()
 
         lines = np.stack([
-            np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + tar_sp * sim_x, p[:,1] + tar_sp * sim_y, zero), -1) 
+            np.stack((p[:,0], p[:,1], p[:,2]+0.01*i, p[:,0] + sim_x, p[:,1] + sim_y, p[:,2]), -1) 
             for i in range(n_lines)], -2)
         
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 1.] for _ in range(n_lines)])  # blue
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[1.0, 0.5, 0.0] for _ in range(n_lines)])  # blue
 
     # visualize root facing
     def visualize_facing_dir(self):
@@ -2880,20 +2927,20 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
             # global direction
             tar_face_dir = self.goal_tensor[:, root_start_idx:root_start_idx+2]
             tar_face_dir = torch.cat((tar_face_dir, torch.zeros(self.root_pos.size(0), 1, device=tar_face_dir.device)), -1)     # [N, 3]
-            
+            #tar_face_dir = torch.nn.functional.normalize(tar_face_dir, dim=-1)
             tar_face_x = tar_face_dir[..., 0].cpu().numpy()
             tar_face_y = tar_face_dir[..., 1].cpu().numpy()
-            
+
             tar_sp = self.goal_tensor[:, start_idx+2].cpu().numpy()
             p = self.root_pos.cpu().numpy()
             zero = np.zeros_like(tar_face_x)+0.05
 
             tar_lines = np.stack([
-                np.stack((p[:,0], p[:,1], p[:,2]+0.01*i, p[:,0] + tar_sp * tar_face_x, p[:,1] + tar_sp * tar_face_y, p[:,2]), -1) 
+                np.stack((p[:,0], p[:,1], zero+0.01*i, p[:,0] + 1.7 * tar_sp * tar_face_x, p[:,1] + 1.7 * tar_sp * tar_face_y, zero), -1) 
                 for i in range(n_lines)], -2)
         
             for e, l in zip(self.envs, tar_lines):
-                self.gym.add_lines(self.viewer, e, n_lines, l, [[1., 1., 1.] for _ in range(n_lines)])      # red -> global
+                self.gym.add_lines(self.viewer, e, n_lines, l, [[0.0, 0.0, 1.] for _ in range(n_lines)])      # red -> global
 
         # sim character's facing direction #! --> 이후에 smoothed direction으로??
         heading_rot = calc_heading_quat(self.root_orient)
@@ -2905,10 +2952,10 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         sim_p = self.root_pos.cpu().numpy()
 
         lines = np.stack([
-            np.stack((sim_p[:,0], sim_p[:,1], sim_p[:,2]+0.01*i, sim_p[:,0] + 0.5 * sim_fx, sim_p[:,1] + 0.5 * sim_fy, sim_p[:,2]), -1) 
+            np.stack((sim_p[:,0], sim_p[:,1], sim_p[:,2]+0.01*i, sim_p[:,0] + self.sim_speed * sim_fx, sim_p[:,1] + self.sim_speed * sim_fy, sim_p[:,2]), -1) 
             for i in range(n_lines)], -2)
         for e, l in zip(self.envs, lines):
-            self.gym.add_lines(self.viewer, e, n_lines, l, [[0., 0., 0.] for _ in range(n_lines)])  # blue
+            self.gym.add_lines(self.viewer, e, n_lines, l, [[0.0, 0.5, 1.0] for _ in range(n_lines)])  # blue
 
     def update_viewer(self):
         super().update_viewer()
@@ -2931,8 +2978,9 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor,
     tar_dir = heading_tensor[:, 0:2]
     tar_sp = heading_tensor[:, -1]
 
+
     # sim charac's global target_direction speed, velocity
-    tar_dir_speed = torch.sum(tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)
+    tar_dir_speed = torch.sum(tar_dir[..., :2] * root_vel[..., :2], dim=-1)       # (N,)    -> 내적
     tar_dir_vel = tar_dir_speed.unsqueeze(-1) * tar_dir                           # N x 2
 
     # sp difference
@@ -2947,9 +2995,15 @@ def compute_heading_reward(root_pos: torch.Tensor, prev_root_pos: torch.Tensor,
 
     speed_mask = tar_dir_speed <= 0
     dir_reward[speed_mask] = 0
+    
+    # calcuate 
+    sp1 = torch.norm(tar_dir[..., :2], dim=-1)      # (N, )
+    sp2 = torch.norm(root_vel[..., :2], dim=-1)     # (N, )
 
+    diff_angle = torch.acos(tar_dir_speed / (sp1 * sp2 + 0.001))
+    
     reward = dir_reward
-    return reward
+    return reward, torch.rad2deg(diff_angle)
 
 @torch.jit.script
 def compute_facing_reward(root_pos: torch.Tensor, root_rot: torch.Tensor, tar_face_dir: torch.Tensor):

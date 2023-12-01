@@ -3,7 +3,7 @@ import importlib
 from collections import namedtuple
 
 import env
-import env_proj, env_reach, env_punch
+import env_proj, env_reach, env_punch, env_forehand
 
 from models import ACModel, Discriminator, ACModel_gembed
 
@@ -66,8 +66,6 @@ TRAINING_PARAMS = dict(
 
 )
 
-EVAL = False
-
 def logger(obs, rews, info):
     buffer = dict(r=[])
     buffer_disc = {
@@ -126,7 +124,7 @@ def logger(obs, rews, info):
 
 def test(env, model):
     #### for evaluation
-    if EVAL:
+    if config.env_params['eval']:
         ep = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
         np_reward = np.empty([ep, 3]) if env.sensor_ablation else np.empty([ep, 4]) 
         curr_ep = 0
@@ -153,7 +151,7 @@ def test(env, model):
 
         reward, sep_reward = logger(obs, rews, info)
 
-        if EVAL:
+        if config.env_params:
             if curr_ep < ep:
                 np_reward[curr_ep] = sep_reward
                 curr_ep += 1
@@ -162,7 +160,7 @@ def test(env, model):
         counter += torch.where(info["terminate"] == False, 1, 0).cpu()  # counter 더해주기
         # terminate 되었다면
         terminated_env = (info["terminate"] == True).nonzero().view(-1).cpu()
-        if EVAL:
+        if config.env_params['eval']:
             if curr_ep == ep or len(terminated_env):
                 time.time()
                 print("\n================" + str(curr_ep) + ": save reward_trial " + str(count), "================\n")
@@ -566,13 +564,15 @@ if __name__ == "__main__":
         if "proj" in config.env_cls.lower():
             env_cls = getattr(env_proj, config.env_cls)
             print(env_cls)
-                
         elif "reach" in config.env_cls.lower():
             env_cls = getattr(env_reach, config.env_cls)
             print(env_cls)
         elif "strike" in config.env_cls.lower():
             env_cls = getattr(env_punch, config.env_cls)
             print(env_cls)
+        elif "forehand" in config.env_cls.lower():
+            env_cls = getattr(env_forehand, config.env_cls)
+            print(env_cls)            
         else:
             env_cls = getattr(env, config.env_cls)
     else:
@@ -592,7 +592,7 @@ if __name__ == "__main__":
         if "view" in (config.env_cls).lower():
             pass
         else:
-            if EVAL:
+            if config.env_params['eval']:
                 env.episode_length = np.load(config.discriminators["usermotion1/upper"]["motion_file"], allow_pickle=True).item()['rotation']['arr'].shape[0]   # 300
             else:
                 env.episode_length = config.env_params['episode_length']
