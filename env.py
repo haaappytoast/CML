@@ -11,6 +11,7 @@ from poselib.core import quat_mul
 from isaacgym import gymutil
 from humanoid_view import HumanoidView, HumanoidViewTennis
 from humanoid_extract import HumanoidExtract, ICCGANHumanoidExtractTarget
+import time
 
 def parse_kwarg(kwargs: dict, key: str, default_val: Any):
     return kwargs[key] if key in kwargs else default_val
@@ -37,9 +38,9 @@ DiscriminatorProperty = namedtuple("DiscriminatorProperty",
 
 class SensorInputConfig(object):
     def __init__(self,
-              rlh_localPos: Optional[str]=None,  
-              rlh_localRot: Optional[str]=None, 
-              joystick: Optional[str]=None):
+            rlh_localPos: Optional[str]=None,  
+            rlh_localRot: Optional[str]=None, 
+            joystick: Optional[str]=None):
         
         self.rlh_localPos = rlh_localPos
         self.rlh_localRot = rlh_localRot
@@ -228,7 +229,7 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_Z, "y_dir")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_X, "-x_dir")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_C, "-y_dir")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "reset")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_M, "reset")
 
         # for interaction with objects
         self.subscribe_keyboards_for_obj()
@@ -418,7 +419,7 @@ class Env(object):
         if self.viewer is not None:
             self.update_viewer()
             self.gym.draw_viewer(self.viewer, self.sim, True)
-            self.gym.sync_frame_time(self.sim)    # sync to simulation dt
+            self.gym.sync_frame_time(self.sim)                  # sync to simulation dt
 
         rewards = self.reward()
         terminate = self.termination_check()                    # N
@@ -991,7 +992,7 @@ def observe_disc(state_hist: torch.Tensor, seq_len: torch.Tensor, key_links: Opt
     mask1 = arange > (n_hist-1) - seq_len_
     mask2 = arange < seq_len_
     ob2[mask2] = ob1[mask1]
-    return ob2              # ob2.shape:  For each Discriminator: [N_ENVS, n_horizons, n_KEY_links * 7] 
+    return ob2              # ob2.shape: For each Discriminator: [N_ENVS, n_horizons, n_KEY_links * 7] 
 
 
 
@@ -1787,7 +1788,12 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #! Should this not be averaged?? 
         self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0)     #(3, )
         self.rlh_lpos = torch.cat((self.r_lpos.unsqueeze(0), self.l_lpos.unsqueeze(0), self.h_lpos.unsqueeze(0)), 0)
-
+        self.r_lpos, self.l_lpos, self.h_lpos = r_localpos, l_localpos, h_localpos
+        #self.r_lpos, self.l_lpos, self.h_lpos = torch.mean(r_localpos, dim=0), torch.mean(l_localpos, dim=0), torch.mean(h_localpos, dim=0)     #(3, )
+        #print("before: ", self.h_lpos[:, 0])
+        
+        #self.h_lpos[:, 0] = -2.5 * self.h_lpos[:, 0]
+        #print("\n\nafter: ", self.h_lpos[:, 0])
         rlh_localRot = np.load(os.getcwd() + sensorconfig.rlh_localRot)
         rlh_localRot = torch.tensor(rlh_localRot, dtype=torch.float32)
         self.h_lrot = rlh_localRot[..., 8:12]
@@ -1852,7 +1858,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         obs, rews, dones, info = super().step(actions)
 
         # record tracking_errors
-        if self.inference:
+        if self.inference and self.eval:
             self.track_errors()
 
         return obs, rews, dones, info
@@ -1951,6 +1957,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
             
         self.goal_motion_ids[env_ids, 0] = torch.tensor(up_goal_motion_ids, dtype=torch.int32, device=self.device)
         self.etime[env_ids, 0] = torch.tensor(up_goal_motion_etime, dtype=torch.float32, device=self.device)
+
         # lower body
         self.lowerbody_goal_motion_ids[env_ids] = torch.tensor(lower_goal_motion_ids, dtype=torch.int32, device=self.device)
 
@@ -1982,13 +1989,13 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
     def update_viewer(self):
         super().update_viewer()
-        # self.visualize_ee_positions()
+        #self.visualize_ee_positions()
         #self.visualize_goal_positions_wrt_curr()
         
-        # self.visualize_goal_positions()
-        # self.visualize_control_positions(isRef=True)
+        #self.visualize_goal_positions()
+        #self.visualize_control_positions(isRef=True)
         self.visualize_control_positions(isRef=False)
-        # self.visualize_hmd_rotations()
+        #self.visualize_hmd_rotations()
         
         # self.visualize_origin()
         # self.visualize_ego_ee()
@@ -2105,11 +2112,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         terminate = torch.any(torch.logical_and(contacted, too_low), -1)    # N x
         terminate *= (self.lifetime > 1)
         term_final = terminate
-        
         # goal에 대한 termination 주었을 때 (ablation study를 위해 추가!)
         if not self.inference and self.goal_termination:
             term_final = self.goal_terminate(terminate)
-        
         return term_final
 
     def reset_envs(self, env_ids):
@@ -2124,12 +2129,14 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         #actor_ids = gymtorch.unwrap_tensor(actor_ids)
         
         #! humanoid
+
         env_ids_int32 = self._humanoid_actor_ids[env_ids].flatten()
         self.gym.set_actor_root_state_tensor_indexed(self.sim,
-            gymtorch.unwrap_tensor(self.root_tensor.squeeze(1)),
-            gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32)
-        )
-
+            #gymtorch.unwrap_tensor(self.root_tensor.squeeze(1)),
+            gymtorch.unwrap_tensor(self._all_root_tensor),
+            gymtorch.unwrap_tensor(env_ids_int32),
+            len(env_ids_int32))
+        
         #actor_ids = self.actor_ids_having_dofs[env_ids].flatten()
 
         #n_actor_ids = len(actor_ids)
@@ -2155,9 +2162,9 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         ee_rot = self.goal_link_orient[:, ee_links, :]   # [num_envs, 3, 4]
 
         #! control ggposition
-        rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos.to(self.device))                  # [num_envs, 3] + (3, )
-        lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos.to(self.device))                  # [num_envs, 3] + (3, )
-        hmd_ggpos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))                       # [num_envs, 3] + (3, )
+        rcontrol_ggpos = ee_pos[:, 0, :] + rotatepoint(ee_rot[:, 0], self.r_lpos[self.lifetime%300].to(self.device))                  # [num_envs, 3] + (3, )
+        lcontrol_ggpos = ee_pos[:, 1, :] + rotatepoint(ee_rot[:, 1], self.l_lpos[self.lifetime%300].to(self.device))                  # [num_envs, 3] + (3, )
+        hmd_ggpos = ee_pos[:, 2, :] + rotatepoint(ee_rot[:, 2], self.h_lpos[self.lifetime%300].to(self.device))                       # [num_envs, 3] + (3, )
 
         # rotation (#!300 should be changed with respect to the motion clip)
         hmd_lrot = self.h_lrot[self.lifetime % 300]                     # [num_envs, 4]
@@ -2243,7 +2250,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         # current rcontrol
         if (self.rpos_coeff != 0):
             rhand_pos = self.link_pos[:, self.r_hand_link]
-            rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos.to(self.device))  
+            rcontrol_pos = rhand_pos + rotatepoint(self.link_orient[:, self.r_hand_link], self.r_lpos[self.lifetime%300].to(self.device))  
             ego_rcontrol_pos = global_to_ego(self.root_pos, self.root_orient, rcontrol_pos, 2)
 
             # target_rcontrol_gpos (this goal_tensor is from previous lifetime goal_tensor) 
@@ -2262,7 +2269,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         if (self.lpos_coeff != 0):
             # current lcontrol
             lhand_pos = self.link_pos[:, self.l_hand_link]
-            lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos.to(self.device))
+            lcontrol_pos = lhand_pos + rotatepoint(self.link_orient[:, self.l_hand_link], self.l_lpos[self.lifetime%300].to(self.device))
             ego_lcontrol_pos = global_to_ego(self.root_pos, self.root_orient, lcontrol_pos, 2)
 
             # target_lcontrol_gpos
@@ -2300,7 +2307,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
 
             # current hmd pos
             head_pos = self.link_pos[:, self.head]
-            hmd_pos = head_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos.to(self.device))
+            hmd_pos = head_pos + rotatepoint(self.link_orient[:, self.head], self.h_lpos[self.lifetime%300].to(self.device))
             ego_hmd_pos = global_to_ego(self.root_pos, self.root_orient, hmd_pos, 2)
 
             # target_hmd_gpos
@@ -2419,9 +2426,10 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         root_pos[:, 0], root_pos[:, 1], root_pos[:, 2] = self.root_pos[:, 0], self.root_pos[:, 1], self.root_pos[:, 2]
 
         for i in range(len(self.envs)):
-            hmd_pos      = ee_pos[i, 0] + rotatepoint(ee_rot[i, 0], self.h_lpos.to(self.device))
-            rcontrol_pos = ee_pos[i, 1] + rotatepoint(ee_rot[i, 1], self.r_lpos.to(self.device))
-            lcontrol_pos = ee_pos[i, 2] + rotatepoint(ee_rot[i, 2], self.l_lpos.to(self.device))
+            #hrot = self.h_lrot[self.lifetime % 300].squeeze(0).to(self.device)
+            hmd_pos      = ee_pos[i, 0] + rotatepoint(ee_rot[i, 0], self.h_lpos[self.lifetime % 20].squeeze().to(self.device))
+            rcontrol_pos = ee_pos[i, 1] + rotatepoint(ee_rot[i, 1], self.r_lpos[self.lifetime % 300].squeeze().to(self.device))
+            lcontrol_pos = ee_pos[i, 2] + rotatepoint(ee_rot[i, 2], self.l_lpos[self.lifetime % 300].squeeze().to(self.device))
 
             if isRef:
                 hmd_pos      = hmd_pos      - goal_root_pos[i]
@@ -2460,7 +2468,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
         
         goal_root_pos = self.goal_root_tensor[:, 0, :3]
         goal_root_rot = self.goal_root_tensor[:, 0, 3:7]   # [num_envs, 3, 4]
-        
+
         hmd_pos      = ee_pos[:, 2] + rotatepoint(ee_rot[:, 2], self.h_lpos.to(self.device))
         rcontrol_pos = ee_pos[:, 5] + rotatepoint(ee_rot[:, 5], self.r_lpos.to(self.device))
         lcontrol_pos = ee_pos[:, l_key_links[2]] + rotatepoint(ee_rot[:, l_key_links[2]], self.l_lpos.to(self.device))
@@ -2645,8 +2653,9 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
     HEADING_COEFF = 0
     FACING_COEFF = 0
     ENABLE_RANDOM_HEADING = True
-    SENSOR_ABLATION = False 
-    
+    SENSOR_ABLATION = False, 
+    EVAL = False
+
     def __init__(self, *args, 
                 sensor_inputs: Optional[Dict[str, SensorInputConfig]]=None,
                  **kwargs):
@@ -2655,6 +2664,7 @@ class ICCGANHumanoidVRControl(ICCGANHumanoidVR):
         self._enable_rand_heading = parse_kwarg(kwargs, "enableRandomHeading", self.ENABLE_RANDOM_HEADING) #! training 시 random_heading 필요
         self.sensor_inputs = sensor_inputs
         self.sensor_ablation = parse_kwarg(kwargs, "sensor_ablation", self.SENSOR_ABLATION)                #! for ablation study
+        self.eval = parse_kwarg(kwargs, "eval", self.EVAL)                #! eval
         
         self.root_coeffs = [False] * 2
         if (self.heading_coeff != 0):

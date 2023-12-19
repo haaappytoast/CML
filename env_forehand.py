@@ -66,13 +66,15 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
         self._proj_h_max = 2
         self._proj_steps = 150
         self._proj_warmup_steps = 1
-        self._proj_speed_min = 10
-        self._proj_speed_max = 15
+        self._proj_speed_min = 12
+        self._proj_speed_max = 14
         self.perterb = False
         self.reach = False
         self.shoot = "none"
+        self.myshoot = False
 
-        dir_body = ["right_hand"]
+        dir_body = ["racket"]
+        #racket_body = ["right_hand"]
         tar_body = ["right_lower_arm"]
         self.dir_body_idx = []
         self.tar_body_idx = []
@@ -237,13 +239,22 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
         
         self._proj_states[..., perturb_id, 3:6] = 0.0
         self._proj_states[..., perturb_id, 6] = 1.0
-        
 
         launch_dir = self._proj_states[..., perturb_id, 0:3] - self.link_pos[..., dir_body_idx, :]
+        print(launch_dir)
         
-        launch_dir[..., 2] += 0.4
+        launch_dir[..., 2] += 0.2
 
         launch_dir = torch.nn.functional.normalize(launch_dir, dim=-1)
+        print(launch_dir) # [ 0.0726,  0.0063, -0.1509] -> [0.8263, 0.0721, 0.5586]
+
+        if self.shoot == "fist":
+            launch_dir = torch.tensor([[0.8245, 0.9682, 0.5618]]).to(self.device)
+        if self.shoot == "second":
+            launch_dir = torch.tensor([[0.8245, 0.0, 0.5618]]).to(self.device)
+        if self.shoot == "third":
+            launch_dir = torch.tensor([[0.1426, -0.9887, 0.4471]]).to(self.device)
+
         launch_speed = (self._proj_speed_max - self._proj_speed_min) * torch.rand_like(launch_dir[:, 0:1]) + self._proj_speed_min
         launch_vel = launch_speed * launch_dir
         launch_vel[..., 0:2] += self.link_lin_vel[..., tar_body_idx, 0:2]
@@ -284,11 +295,11 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
 
     def map_z(self, action):
         if action == "first":   # KEY_1
-            return [0.58, -0.25, 0.38]
-        elif action == "second":   # KEY_2
             return [0.58, -0.25, 0.50]
+        elif action == "second":   # KEY_2
+            return [0.55, -0.15, 0.70]
         elif action == "third":   # KEY_3
-            return [0.58, -0.25, 0.45]  
+            return [0.65, -0.15, 0.60]  
         else:
             return [-100, -100, -100]
     
@@ -296,8 +307,12 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
         if (torch.norm(self._proj_contact_forces, dim=-1).item())!=0 and self.perterb:
             self.reach = False
             self._update_proj()
-        if self.shoot == "fourth":
-            self._update_proj()
+        # if self.shoot == "fourth":
+        #     self._update_proj()
+        if self.myshoot:
+            self.reach = False
+            self.myshoot = False
+            self._update_proj()            
             
         elif self.reach == True:
             self.perterb = True
@@ -309,6 +324,7 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_1, "first")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "second")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "third")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_4, "shooot")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_R, "right_shoot")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_T, "left_shoot")
         return
@@ -324,10 +340,8 @@ class ICCGANHumanoidForehand(HumanoidTennisVRControl):
         if (event.action == "third") and event.value > 0:
             self.reach = True
             self.shoot = "third"
-        # projectile
-        if (event.action == "right_shoot" or event.action == "left_shoot") and event.value > 0:
-            self.perterb = True
-            self.reach = False
-            self.shoot = "fourth"
+        if (event.action == "shooot") and event.value > 0:
+            self.reach = True
+            self.myshoot = True     
         
         return

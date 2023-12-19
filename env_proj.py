@@ -143,7 +143,7 @@ class ICCGANHumanoidProjectile(ICCGANHumanoidVRControl):
         small_asset_options.angular_damping = 0.01
         small_asset_options.linear_damping = 0.01
         small_asset_options.max_angular_velocity = 100.0
-        small_asset_options.density = 20.0
+        small_asset_options.density = 25.0
         small_asset_options.default_dof_drive_mode = gymapi.DOF_MODE_NONE
 
         self._small_proj_asset = self.gym.load_asset(self.sim, asset_root, small_asset_file, small_asset_options)
@@ -254,7 +254,7 @@ class ICCGANHumanoidProjectile(ICCGANHumanoidVRControl):
 
             launch_dir = launch_tar_pos - self._proj_states[..., perturb_id, 0:3]
             
-            launch_dir[..., 2] += 0.5 if self.shoot == "right" else 0.4
+            launch_dir[..., 2] += 0.45 if self.shoot == "right" else 0.4
             #launch_dir += 0.1 * torch.randn_like(launch_dir)
             launch_dir = torch.nn.functional.normalize(launch_dir, dim=-1)
             launch_speed = (self._proj_speed_max - self._proj_speed_min) * torch.rand_like(launch_dir[:, 0:1]) + self._proj_speed_min

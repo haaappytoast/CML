@@ -188,16 +188,16 @@ class ICCGANHumanoidReach(ICCGANHumanoidVRControl):
         if action == "ru_object":   # KEY_1
             return [0.46, -0.38, 0.85]
         if action == "rm_object":   # KEY_2
-            return [0.54, -0.49, 0.45]
+            return [0.52, -0.55, 0.45]
         if action == "rd_object":   # KEY_3
             return [0.52, -0.47, 0.14]
         
         if action == "lu_object":   # KEY_Q
-            return [0.37, 0.44, 0.92]
+            return [0.37, 0.44, 0.93]
         if action == "lm_object":   # KEY_W
             return [0.59, 0.44, 0.5]        
         if action == "ld_object":   # KEY_E
-            return [0.43, 0.42 ,0.1]        
+            return [0.46, 0.42 ,0.1]        
         else:
             return [-100, -100, -100]
 
