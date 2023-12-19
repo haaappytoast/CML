@@ -195,8 +195,13 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_F, "TOGGLE_CAMERA_FOLLOWING")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_P, "TOGGLE_PAUSE")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_D, "SINGLE_STEP_ADVANCE")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_2, "FullBody")
-        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_3, "Default")
+
+
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_0, "FullBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_9, "UpperBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_8, "LowerBody")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_7, "Default")
+
 
     def update_viewer(self):
         self.gym.poll_viewer_events(self.viewer)
@@ -209,10 +214,16 @@ class Env(object):
                 self.viewer_pause = not self.viewer_pause
             if event.action == "SINGLE_STEP_ADVANCE" and event.value > 0:
                 self.viewer_advance = not self.viewer_advance
+
+            if event.action == "UpperBody" and event.value > 0:
+                self.upper, self.lower, self.full = True, False, False
+            if event.action == "LowerBody" and event.value > 0:
+                self.upper, self.lower, self.full = False, True, False
             if event.action == "FullBody" and event.value > 0:
-                self.full = True
+                self.upper, self.lower, self.full = False, False, True
             if event.action == "Default" and event.value > 0:
-                self.full = False               
+                self.upper, self.lower, self.full = False, False, False
+
         if self.camera_following: self.update_camera()
         self.gym.step_graphics(self.sim)
 
@@ -862,14 +873,12 @@ class HumanoidView(ICCGANHumanoid):
     def create_motion_info(self):
         self.motion_ids = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
         self.motion_times = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
-        self.full = False
-
+        self.upper, self.lower, self.full = False, False, False
 
     def update_viewer(self):
         super().update_viewer()
 
         self.gym.clear_lines(self.viewer)
-
         # self.visualize_ee_positions()
         # self.temporary()
         # self.visualize_axis(self.link_pos[:,[2, 5, 8], :], self.link_orient[:,[2, 5, 8], :], scale = 0.2, y=True, z =True)
@@ -899,24 +908,32 @@ class HumanoidView(ICCGANHumanoid):
         return
     
     def return_key_links(self):
-        # get motion length from goal_motion_ids
-        for ref_motion, replay_speed, ob_horizon, discs in self.disc_ref_motion:
-            if "upper" in discs[0].name or "full" in discs[0].name:
-                up_key_links = discs[0].key_links
-        return up_key_links
+        # humanoidView
+        up_key_links = [1, 2, 3, 4, 5, 6, 7, 8]
+        l_key_links = [0, 9, 10, 11, 12, 13, 14]
+        return up_key_links, l_key_links
 
+    
     def step(self, actions):
         self.state_hist[:-1] = self.state_hist[1:].clone()
         env_ids = list(range(len(self.envs)))
 
         if self.viewer is not None: 
-            up_key_links = self.return_key_links()
+            up_key_links, l_key_links = self.return_key_links()
 
-            if (self.full):
-                # self.set_char_color([1.0, 0.5, 0.5], env_ids, up_key_links)
-                self.set_char_color([0.0, 0.0, 0.0], env_ids, up_key_links)
+            if (self.upper):    
+                self.set_char_color([0.0, 0.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)
+            elif (self.lower):
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([0.0, 1.0, 0.0], env_ids, l_key_links)
+
+            elif (self.full):
+                self.set_char_color([0.0, 0.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([0.0, 1.0, 0.0], env_ids, l_key_links)
             else:
                 self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
+                self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)
 
         ### Env step
         obs, rews, dones, info = super().step(actions)
