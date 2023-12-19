@@ -17,10 +17,6 @@ motions:
 - file: CML@Punching Bag (5).npy # (4) mirrored
   weight: null
 #! idelblock
-- file: cml@idleblock (1).npy
-  weight: null
-- file: cml@idleblock (2).npy
-  weight: null
 - file: cml@idleblock (3).npy
   weight: null
 - file: cml@idleblock (4).npy
@@ -28,8 +24,6 @@ motions:
 
 #! REAL
 - file: cml@user_punch (1).npy
-  weight: null
-- file: cml@user_punch (2).npy
   weight: null
 - file: cml@user_punch (3).npy
   weight: null
