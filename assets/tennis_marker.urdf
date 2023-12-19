@@ -14,7 +14,7 @@
     <collision>
       <origin xyz="0 0 0"/>
       <geometry>
-        <sphere radius="0.045"/>
+        <sphere radius="0.055"/>
       </geometry>
     </collision>
   </link>
