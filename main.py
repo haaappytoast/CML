@@ -151,7 +151,7 @@ def test(env, model):
 
         reward, sep_reward = logger(obs, rews, info)
 
-        if config.env_params:
+        if config.env_params['eval']:
             if curr_ep < ep:
                 np_reward[curr_ep] = sep_reward
                 curr_ep += 1
