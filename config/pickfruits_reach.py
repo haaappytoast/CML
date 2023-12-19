@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/pickfruits_reach.py --ckpt 1120_pick_REAL+MIX_embedded+16/ckpt-20000 --test
+# python main.py config/pickfruits_reach.py --ckpt 1128_pick_REAL+MIX0302/ckpt-20000 --test
 env_cls = "ICCGANHumanoidReach"     # ICCGANHumanoidVRControl
 env_params = dict(
     episode_length = 630,               # TEST0: 560 TEST1:630 TEST2: 520
@@ -16,7 +16,8 @@ env_params = dict(
     #strikeBodyNames = ["right_hand", "right_lower_arm"]
     goal_termination = False,
     goal_embedding = True,
-    sensor_ablation = False     
+    sensor_ablation = False,
+    eval = True
 )
 
 training_params = dict(
@@ -55,7 +56,7 @@ discriminators = {
         # motion_file = "assets/retargeted/test/cml@1023_picking_fruits_motion.npy",
         # motion_file = "assets/retargeted/1116_pickup/cml@Picking Up Object_mirrored.npy",
         # motion_file = "assets/retargeted/1116_pickup/1116_pickup_MIX+REAL.yaml",
-        motion_file = "assets/retargeted/1116_pickup/cml@user_pick_TEST2.npy",
+        motion_file = "assets/retargeted/1116_pickup/cml@user_pick_TEST0.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,

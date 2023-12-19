@@ -2,7 +2,7 @@ import numpy as np
 # python main.py config/tennisVR_forehand.py --ckpt 1128_tennis_REAL+MIX0302/ckpt-20000 --test
 env_cls = "ICCGANHumanoidForehand"
 env_params = dict(
-    episode_length = 300,
+    episode_length = 577,
     motion_file = "assets/retargeted/1127_tennis/1106_tennis_walk.yaml",    # lower part
     sp_lower_bound = 0.9,
     goal_reward_weight = (0.3, 0.2),
@@ -15,7 +15,7 @@ env_params = dict(
     enableRandomHeading=True,
     goal_termination = False,
     sensor_ablation = False,     
-    eval = True
+    eval = False
 )
 
 training_params = dict(
@@ -42,13 +42,13 @@ sensor_input = {
     "test" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/joystick1"
+        joystick = "/Unity_postprocess/joystick_input/joystick4"
     )
 }
 
 discriminators = {
     "usermotion1/upper": dict(
-        motion_file = "assets/retargeted/1127_tennis/cml@user_tennis_1128_TEST1.npy",
+        motion_file = "assets/retargeted/1127_tennis/cml@user_tennis_1128_TEST3_1.npy",
         # motion_file = "assets/retargeted/1127_tennis/1127_tennis_MIX+REAL.yaml",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "racket", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",

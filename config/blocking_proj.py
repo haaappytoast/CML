@@ -1,5 +1,5 @@
 import numpy as np
-# python main.py config/blocking_proj.py --ckpt 1116_block_MIX+REAL_embedded+16/ckpt-20000 --test
+# python main.py config/blocking_proj.py --ckpt 1116_block_MIX+REAL/ckpt-20000 --test
 env_cls = "ICCGANHumanoidProjectile"
 env_params = dict(
     episode_length = 450,
@@ -15,7 +15,8 @@ env_params = dict(
     enableRandomHeading=True,
     goal_termination = False,
     goal_embedding = True,
-    sensor_ablation = False 
+    sensor_ablation = False,
+    eval = True
     
 )
 
