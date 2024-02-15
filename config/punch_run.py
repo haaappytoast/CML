@@ -1,9 +1,9 @@
 import numpy as np
-# python main.py config/punch_run.py --ckpt 1220_punch+MIX0302 --headless --server local
+# python main.py config/punch_run.py --ckpt 1220_punch+RUN0302 --headless --server local
 env_cls = "ICCGANHumanoidVRControl"
 env_params = dict(
     episode_length = 740,
-    motion_file = "assets/motions/clips_run.yaml",    # lower part
+    motion_file = "assets/motions/clips_walk.yaml",    # lower part
     sp_lower_bound = 2,
     sp_upper_bound = 4,
     goal_timer_range = (60, 90),
@@ -50,8 +50,8 @@ sensor_input = {
 discriminators = {
     "usermotion1/upper": dict(
         # test 5
-        motion_file = "assets/retargeted/1122_punch/1122_punch_MIX+REAL.yaml",
-        #motion_file = "assets/retargeted/1122_punch/cml@TEST1212punch2_50s_0to740.npy",
+        #motion_file = "assets/retargeted/1122_punch/1122_punch_MIX+REAL.yaml",
+        motion_file = "assets/retargeted/1122_punch/cml@TEST1212punch2_50s_0to740.npy",
         key_links = ["torso", "head", "right_upper_arm", "right_lower_arm", "right_hand", "left_upper_arm", "left_lower_arm", "left_hand"],
         parent_link = "pelvis",
         ob_horizon = 3,

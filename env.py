@@ -1990,7 +1990,7 @@ class ICCGANHumanoidVR(ICCGANHumanoidEE):
     def update_viewer(self):
         super().update_viewer()
         #self.visualize_ee_positions()
-        #self.visualize_goal_positions_wrt_curr()
+        self.visualize_goal_positions_wrt_curr()
         
         #self.visualize_goal_positions()
         #self.visualize_control_positions(isRef=True)

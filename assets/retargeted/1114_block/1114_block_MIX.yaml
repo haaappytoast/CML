@@ -28,10 +28,6 @@ motions:
 - file: cml@outblock (7)_reverse.npy
   weight: null
 #! idelblock
-- file: cml@idleblock (1).npy
-  weight: null
-- file: cml@idleblock (2).npy
-  weight: null
 - file: cml@idleblock (3).npy
   weight: null
 - file: cml@idleblock (4).npy

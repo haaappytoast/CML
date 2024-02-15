@@ -201,6 +201,7 @@ class Env(object):
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_9, "UpperBody")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_8, "LowerBody")
         self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_7, "Default")
+        self.gym.subscribe_viewer_keyboard_event(self.viewer, gymapi.KEY_6, "pink")
 
 
     def update_viewer(self):
@@ -220,9 +221,11 @@ class Env(object):
             if event.action == "LowerBody" and event.value > 0:
                 self.upper, self.lower, self.full = False, True, False
             if event.action == "FullBody" and event.value > 0:
-                self.upper, self.lower, self.full = False, False, True
+                self.upper, self.lower, self.full, self.pink = False, False, True, False
             if event.action == "Default" and event.value > 0:
                 self.upper, self.lower, self.full = False, False, False
+            if event.action == "pink" and event.value > 0:
+                self.upper, self.lower, self.full, self.pink = False, False, True, True                
 
         if self.camera_following: self.update_camera()
         self.gym.step_graphics(self.sim)
@@ -873,7 +876,7 @@ class HumanoidView(ICCGANHumanoid):
     def create_motion_info(self):
         self.motion_ids = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
         self.motion_times = torch.zeros_like(self.lifetime, dtype=torch.float32, device=self.device)
-        self.upper, self.lower, self.full = False, False, False
+        self.upper, self.lower, self.full, self.pink = False, False, False, False
 
     def update_viewer(self):
         super().update_viewer()
@@ -911,6 +914,8 @@ class HumanoidView(ICCGANHumanoid):
         # humanoidView
         up_key_links = [1, 2, 3, 4, 5, 6, 7, 8]
         l_key_links = [0, 9, 10, 11, 12, 13, 14]
+
+        # humanoidViewTennis
         return up_key_links, l_key_links
 
     
@@ -931,6 +936,9 @@ class HumanoidView(ICCGANHumanoid):
             elif (self.full):
                 self.set_char_color([0.0, 0.0, 1.0], env_ids, up_key_links)
                 self.set_char_color([0.0, 1.0, 0.0], env_ids, l_key_links)
+                if (self.pink):
+                    self.set_char_color([1.0, 0.471, 0.471], env_ids, up_key_links)
+                    self.set_char_color([1.0, 0.471, 0.471], env_ids, l_key_links)                    
             else:
                 self.set_char_color([1.0, 1.0, 1.0], env_ids, up_key_links)
                 self.set_char_color([1.0, 1.0, 1.0], env_ids, l_key_links)

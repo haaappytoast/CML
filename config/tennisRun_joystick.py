@@ -43,7 +43,7 @@ sensor_input = {
     "test" : dict(
         rlh_localPos = "/assets/retargeted/MetaAvatar@control1@rlh_localPos.npy",
         rlh_localRot = "/assets/retargeted/MetaAvatar@control1@rlh_localRot.npy",
-        joystick = "/Unity_postprocess/joystick_input/joystick1"
+        joystick = "/Unity_postprocess/joystick_input/joystick50s"
     )
 }
 

@@ -15,3 +15,21 @@ motions:
   weight: null
 - file: locomotion/lafan1_walk1_subject5_80_1715_mirror.json
   weight: null
+
+# Loading 1/8 motion files: assets/motions/locomotion/lafan1_walk1_subject1_100_1170.json
+#35.6333s, 30 Hz, 1070 frames
+# Loading 2/8 motion files: assets/motions/locomotion/lafan1_walk1_subject1_100_1170_mirror.json
+#35.6333s, 30 Hz, 1070 frames
+# Loading 3/8 motion files: assets/motions/locomotion/lafan1_walk1_subject1_2460_3680.json
+#40.6333s, 30 Hz, 1220 frames
+# Loading 4/8 motion files: assets/motions/locomotion/lafan1_walk1_subject1_2460_3680_mirror.json
+#40.6333s, 30 Hz, 1220 frames
+# Loading 5/8 motion files: assets/motions/locomotion/lafan1_walk1_subject5_5740_6830.json
+#36.3000s, 30 Hz, 1090 frames
+# Loading 6/8 motion files: assets/motions/locomotion/lafan1_walk1_subject5_5740_6830_mirror.json
+#36.3000s, 30 Hz, 1090 frames
+# Loading 7/8 motion files: assets/motions/locomotion/lafan1_walk1_subject5_80_1715.json
+#54.4667s, 30 Hz, 1635 frames
+# Loading 8/8 motion files: assets/motions/locomotion/lafan1_walk1_subject5_80_1715_mirror.json
+#54.4667s, 30 Hz, 1635 frames
+# Loaded 8 motions with a total length of 334.067s

@@ -7,3 +7,11 @@ motions:
   weight: null
 - file: locomotion/lafan1_run2_subject1_145_2445_mirror.json
   weight: null
+
+# Loading 1/3 motion files: assets/motions/locomotion/lafan1_run1_subject5_160_2105.json
+#64.8000s, 30 Hz, 1945 frames
+# Loading 2/3 motion files: assets/motions/locomotion/lafan1_run1_subject5_160_2105_mirror.json
+# 64.8000s, 30 Hz, 1945 frames
+# Loading 3/3 motion files: assets/motions/locomotion/lafan1_run2_subject1_145_2445.json
+# 76.6333s, 30 Hz, 2300 frames
+# Loaded 3 motions with a total length of 206.233s
